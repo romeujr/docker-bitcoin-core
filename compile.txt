@@ -1,0 +1,35 @@
+docker build --platform linux/amd64 --build-arg P_TARGETPLATFORM="linux/amd64" --build-arg P_BITCOIN_VERSION="22.0" -t romeujr/bitcoin-core:22.0-amd64 -f Dockerfile .
+docker build --platform linux/arm64 --build-arg P_TARGETPLATFORM="linux/arm64" --build-arg P_BITCOIN_VERSION="22.0" -t romeujr/bitcoin-core:22.0-arm64 -f Dockerfile .
+
+docker build --platform linux/amd64 --build-arg P_TARGETPLATFORM="linux/amd64" --build-arg P_BITCOIN_VERSION="22.1" -t romeujr/bitcoin-core:22.1-amd64 -f Dockerfile .
+docker build --platform linux/arm64 --build-arg P_TARGETPLATFORM="linux/arm64" --build-arg P_BITCOIN_VERSION="22.1" -t romeujr/bitcoin-core:22.1-arm64 -f Dockerfile .
+
+docker build --platform linux/amd64 --build-arg P_TARGETPLATFORM="linux/amd64" --build-arg P_BITCOIN_VERSION="23.0" -t romeujr/bitcoin-core:23.0-amd64 -f Dockerfile .
+docker build --platform linux/arm64 --build-arg P_TARGETPLATFORM="linux/arm64" --build-arg P_BITCOIN_VERSION="23.0" -t romeujr/bitcoin-core:23.0-arm64 -f Dockerfile .
+
+docker build --platform linux/amd64 --build-arg P_TARGETPLATFORM="linux/amd64" --build-arg P_BITCOIN_VERSION="23.1" -t romeujr/bitcoin-core:23.1-amd64 -f Dockerfile .
+docker build --platform linux/arm64 --build-arg P_TARGETPLATFORM="linux/arm64" --build-arg P_BITCOIN_VERSION="23.1" -t romeujr/bitcoin-core:23.1-arm64 -f Dockerfile .
+
+docker build --platform linux/amd64 --build-arg P_TARGETPLATFORM="linux/amd64" --build-arg P_BITCOIN_VERSION="23.2" -t romeujr/bitcoin-core:23.2-amd64 -f Dockerfile .
+docker build --platform linux/arm64 --build-arg P_TARGETPLATFORM="linux/arm64" --build-arg P_BITCOIN_VERSION="23.2" -t romeujr/bitcoin-core:23.2-arm64 -f Dockerfile .
+
+docker build --platform linux/amd64 --build-arg P_TARGETPLATFORM="linux/amd64" --build-arg P_BITCOIN_VERSION="24.0" -t romeujr/bitcoin-core:24.0-amd64 -f Dockerfile .
+docker build --platform linux/arm64 --build-arg P_TARGETPLATFORM="linux/arm64" --build-arg P_BITCOIN_VERSION="24.0" -t romeujr/bitcoin-core:24.0-arm64 -f Dockerfile .
+
+docker build --platform linux/amd64 --build-arg P_TARGETPLATFORM="linux/amd64" --build-arg P_BITCOIN_VERSION="24.0.1" -t romeujr/bitcoin-core:24.0.1-amd64 -f Dockerfile .
+docker build --platform linux/arm64 --build-arg P_TARGETPLATFORM="linux/arm64" --build-arg P_BITCOIN_VERSION="24.0.1" -t romeujr/bitcoin-core:24.0.1-arm64 -f Dockerfile .
+
+docker build --platform linux/amd64 --build-arg P_TARGETPLATFORM="linux/amd64" --build-arg P_BITCOIN_VERSION="24.1" -t romeujr/bitcoin-core:24.1-amd64 -f Dockerfile .
+docker build --platform linux/arm64 --build-arg P_TARGETPLATFORM="linux/arm64" --build-arg P_BITCOIN_VERSION="24.1" -t romeujr/bitcoin-core:24.1-arm64 -f Dockerfile .
+
+docker build --platform linux/amd64 --build-arg P_TARGETPLATFORM="linux/amd64" --build-arg P_BITCOIN_VERSION="24.2" -t romeujr/bitcoin-core:24.2-amd64 -f Dockerfile .
+docker build --platform linux/arm64 --build-arg P_TARGETPLATFORM="linux/arm64" --build-arg P_BITCOIN_VERSION="24.2" -t romeujr/bitcoin-core:24.2-arm64 -f Dockerfile .
+
+docker build --platform linux/amd64 --build-arg P_TARGETPLATFORM="linux/amd64" --build-arg P_BITCOIN_VERSION="25.0" -t romeujr/bitcoin-core:25.0-amd64 -f Dockerfile .
+docker build --platform linux/arm64 --build-arg P_TARGETPLATFORM="linux/arm64" --build-arg P_BITCOIN_VERSION="25.0" -t romeujr/bitcoin-core:25.0-arm64 -f Dockerfile .
+
+docker build --platform linux/amd64 --build-arg P_TARGETPLATFORM="linux/amd64" --build-arg P_BITCOIN_VERSION="25.1" -t romeujr/bitcoin-core:25.1-amd64 -f Dockerfile .
+docker build --platform linux/arm64 --build-arg P_TARGETPLATFORM="linux/arm64" --build-arg P_BITCOIN_VERSION="25.1" -t romeujr/bitcoin-core:25.1-arm64 -f Dockerfile .
+
+docker build --platform linux/amd64 --build-arg P_TARGETPLATFORM="linux/amd64" --build-arg P_BITCOIN_VERSION="26.0" -t romeujr/bitcoin-core:26.0-amd64 -f Dockerfile .
+docker build --platform linux/arm64 --build-arg P_TARGETPLATFORM="linux/arm64" --build-arg P_BITCOIN_VERSION="26.0" -t romeujr/bitcoin-core:26.0-arm64 -f Dockerfile .
