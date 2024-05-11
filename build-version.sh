@@ -5,7 +5,7 @@ VERSION=$1
 echo ""
 echo "Clean old images for version $VERSION."
 docker image rm romeujr/bitcoin-core:$VERSION-amd64
-docker image rm romeujr/bitcoin-core:$VERSION-amd64
+docker image rm romeujr/bitcoin-core:$VERSION-arm64
 echo "y" | docker builder prune
 
 echo ""
@@ -13,16 +13,16 @@ echo "Build version $VERSION for amd64..."
 docker buildx build --platform linux/amd64 --build-arg P_TARGETPLATFORM="linux/amd64" --build-arg P_BITCOIN_VERSION="$VERSION" -t romeujr/bitcoin-core:$VERSION-amd64 -f Dockerfile .
 
 echo ""
-echo "Build version $VERSION for amd64..."
+echo "Build version $VERSION for arm64..."
 docker buildx build --platform linux/arm64 --build-arg P_TARGETPLATFORM="linux/arm64" --build-arg P_BITCOIN_VERSION="$VERSION" -t romeujr/bitcoin-core:$VERSION-arm64 -f Dockerfile .
-
-echo ""
-echo "Push version $VERSION for amd64..."
-docker push romeujr/bitcoin-core:$VERSION-amd64
 
 echo ""
 echo "Push version $VERSION for arm64..."
 docker push romeujr/bitcoin-core:$VERSION-arm64
+
+echo ""
+echo "Push version $VERSION for amd64..."
+docker push romeujr/bitcoin-core:$VERSION-amd64
 
 echo ""
 echo "Clean manifest for version $VERSION."
