@@ -26,7 +26,7 @@ RUN groupadd --gid ${P_GID} bitcoin && \
     echo 'if ! grep -qs " $BITCOIN_DATA " /proc/mounts; then' >> /opt/entry-point.sh && \
     echo '  echo ""' >> /opt/entry-point.sh && \
     echo '  echo "Error: Mounting point not found \"$BITCOIN_DATA\"."' >> /opt/entry-point.sh && \
-    echo '  echo "Try: docker run <YOUR_DOCKER_OPTIONS> -v <HOST_DATA_DIRECTORY>:$BITCOIN_DATA <THIS_IMAGE_NAME>"' >> /opt/entry-point.sh && \
+    echo '  echo "Try: docker run <YOUR_DOCKER_OPTIONS> -v <HOST_DATA_DIRECTORY>:$BITCOIN_DATA <THIS_IMAGE_NAME_AND_TAG> <YOUR_BITCOIN_CORE_OPTIONS>"' >> /opt/entry-point.sh && \
     echo '  echo ""' >> /opt/entry-point.sh && \
     echo '  exit -1' >> /opt/entry-point.sh && \
     echo 'fi' >> /opt/entry-point.sh && \
