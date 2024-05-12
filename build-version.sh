@@ -1,14 +1,16 @@
 #!/bin/bash
 
-set -e
-
 VERSION=$1
+
+set +e
 
 echo ""
 echo "Clean old images for version $VERSION."
 docker image rm romeujr/bitcoin-core:$VERSION-amd64
 docker image rm romeujr/bitcoin-core:$VERSION-arm64
 echo "y" | docker builder prune
+
+set -e
 
 echo ""
 echo "Build version $VERSION for amd64..."
