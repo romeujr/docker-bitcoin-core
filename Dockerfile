@@ -26,7 +26,23 @@ RUN groupadd --gid ${P_GID} bitcoin && \
     echo 'if ! grep -qs " $BITCOIN_DATA " /proc/mounts; then' >> /opt/entry-point.sh && \
     echo '  echo ""' >> /opt/entry-point.sh && \
     echo '  echo "Error: Mounting point not found \"$BITCOIN_DATA\"."' >> /opt/entry-point.sh && \
-    echo '  echo "Try: docker run <YOUR_DOCKER_OPTIONS> -v <HOST_DATA_DIRECTORY>:$BITCOIN_DATA <THIS_IMAGE_NAME_AND_TAG> <YOUR_BITCOIN_CORE_OPTIONS>"' >> /opt/entry-point.sh && \
+    echo '  echo "Try: docker run <YOUR_DOCKER_OPTIONS> -v <HOST_DATA_DIRECTORY>:$BITCOIN_DATA <THIS_IMAGE_NAME_AND_TAG> <YOUR_BITCOIN_CORE_COMMAND_OPTIONS>"' >> /opt/entry-point.sh && \
+    echo '  echo ""' >> /opt/entry-point.sh && \
+    echo '  echo "For more information about this docker image:"' >> /opt/entry-point.sh && \
+    echo '  echo "https://hub.docker.com/r/romeujr/bitcoin-core"' >> /opt/entry-point.sh && \
+    echo '  echo "https://github.com/romeujr/docker-bitcoin-core"' >> /opt/entry-point.sh && \
+    echo '  echo ""' >> /opt/entry-point.sh && \
+    echo '  echo "For more information about the '"'docker run'"' command:"' >> /opt/entry-point.sh && \
+    echo '  echo "https://docs.docker.com/engine/reference/run/"' >> /opt/entry-point.sh && \
+    echo '  echo "https://docs.docker.com/engine/reference/commandline/run"' >> /opt/entry-point.sh && \
+    echo '  echo ""' >> /opt/entry-point.sh && \
+    echo '  echo "For more information about Bitcoin Core command options:"' >> /opt/entry-point.sh && \
+    echo '  echo "https://man.archlinux.org/man/extra/bitcoin-daemon/bitcoind.1.en"' >> /opt/entry-point.sh && \
+    echo '  echo "You can also get help directly by using '"'-help'"' or '"'-help-debug'"' in your Bitcoin Core command options."' >> /opt/entry-point.sh && \
+    echo '  echo ""' >> /opt/entry-point.sh && \
+    echo '  echo "For more information about Bitcoin Core release notes:"' >> /opt/entry-point.sh && \
+    echo '  echo "https://github.com/bitcoin/bitcoin/tree/master/doc/release-notes"' >> /opt/entry-point.sh && \
+    echo '  echo "https://github.com/bitcoin/bitcoin/blob/master/doc/release-notes/release-notes-'${P_BITCOIN_VERSION}'.md"' >> /opt/entry-point.sh && \
     echo '  echo ""' >> /opt/entry-point.sh && \
     echo '  exit -1' >> /opt/entry-point.sh && \
     echo 'fi' >> /opt/entry-point.sh && \
