@@ -28,9 +28,13 @@ echo ""
 echo "Push version $VERSION for amd64..."
 docker push romeujr/bitcoin-core:$VERSION-amd64
 
+set +e
+
 echo ""
 echo "Clean manifest for version $VERSION."
 docker manifest rm romeujr/bitcoin-core:$VERSION
+
+set -e
 
 echo ""
 echo "Create manifest for version $VERSION."
