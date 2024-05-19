@@ -10,9 +10,13 @@ for STRING in "${VERSIONS[@]}"; do
     ./build-version.sh $VERSION
 done
 
+set +e
+
 echo ""
 echo "Clean manifest for latest version."
 docker manifest rm romeujr/bitcoin-core:latest
+
+set -e
 
 echo ""
 echo "Create manifest for latest version."
