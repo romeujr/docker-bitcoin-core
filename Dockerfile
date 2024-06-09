@@ -1,15 +1,14 @@
 FROM debian:bookworm-slim
 
-ARG P_UID=101
-ARG P_GID=101
 ARG P_TARGETPLATFORM
 ARG P_BITCOIN_VERSION
 
+ENV B_UID=1000
+ENV B_GID=1000
 ENV DEBIAN_FRONTEND=noninteractive
 ENV BITCOIN_DATA=/home/bitcoin/.bitcoin
 
-RUN groupadd --gid ${P_GID} bitcoin && \
-    useradd --create-home --no-log-init -u ${P_UID} -g ${P_GID} bitcoin && \
+RUN useradd --create-home --no-log-init bitcoin && \
     apt update -y && \
     apt install -y curl && \
     apt clean && \
@@ -23,8 +22,19 @@ RUN groupadd --gid ${P_GID} bitcoin && \
     ln -s /opt/bitcoin-${P_BITCOIN_VERSION} /opt/bitcoin && \
     echo '#!/bin/bash' >> /opt/entry-point.sh && \
     echo '' >> /opt/entry-point.sh && \
+    echo 'echo ""' >> /opt/entry-point.sh && \
+    echo 'if [ "$(id -u bitcoin)" -ne "${B_UID}" ]; then' >> /opt/entry-point.sh && \
+    echo '  usermod -u ${B_UID} bitcoin' >> /opt/entry-point.sh && \
+    echo 'fi' >> /opt/entry-point.sh && \
+    echo '' >> /opt/entry-point.sh && \
+    echo 'if [ "$(id -g bitcoin)" -ne "${B_GID}" ]; then' >> /opt/entry-point.sh && \
+    echo '  groupmod -g ${B_GID} bitcoin' >> /opt/entry-point.sh && \
+    echo 'fi' >> /opt/entry-point.sh && \
+    echo '' >> /opt/entry-point.sh && \
+    echo 'su - bitcoin -c "id"' >> /opt/entry-point.sh && \
+    echo 'echo ""' >> /opt/entry-point.sh && \
+    echo '' >> /opt/entry-point.sh && \
     echo 'if ! grep -qs " $BITCOIN_DATA " /proc/mounts; then' >> /opt/entry-point.sh && \
-    echo '  echo ""' >> /opt/entry-point.sh && \
     echo '  echo "Error: Mounting point not found \"$BITCOIN_DATA\"."' >> /opt/entry-point.sh && \
     echo '  echo "Try: docker run <YOUR_DOCKER_OPTIONS> -v <HOST_DATA_DIRECTORY>:$BITCOIN_DATA <THIS_IMAGE_NAME_AND_TAG> <YOUR_BITCOIN_CORE_COMMAND_OPTIONS>"' >> /opt/entry-point.sh && \
     echo '  echo ""' >> /opt/entry-point.sh && \
