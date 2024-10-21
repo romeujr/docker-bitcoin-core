@@ -57,7 +57,7 @@ RUN useradd --create-home --no-log-init bitcoin && \
     echo '  exit -1' >> /opt/entry-point.sh && \
     echo 'fi' >> /opt/entry-point.sh && \
     echo '' >> /opt/entry-point.sh && \
-    echo 'su - bitcoin -c "/opt/bitcoin/bin/bitcoind $*"' >> /opt/entry-point.sh && \
+    echo 'su - bitcoin -c "echo '\'Parameters:\'' && echo $* && echo '\'\'' && /opt/bitcoin/bin/bitcoind $*"' >> /opt/entry-point.sh && \
     chmod 744 /opt/entry-point.sh
 
 ENTRYPOINT ["/opt/entry-point.sh"]
