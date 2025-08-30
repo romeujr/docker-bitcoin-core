@@ -1,4 +1,4 @@
-FROM debian:bookworm-slim
+FROM debian:trixie-slim
 
 ARG P_TARGETPLATFORM
 ARG P_BITCOIN_VERSION
