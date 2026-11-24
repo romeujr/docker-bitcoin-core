@@ -20,7 +20,7 @@ The image is built to be *boring and safe* for long-running nodes: your data is 
 |---|---|
 | **Official, verified binaries** | Downloaded from bitcoincore.org at build time. `SHA256SUMS` must carry at least 3 valid signatures from the [Bitcoin Core builder keys](https://github.com/bitcoin-core/guix.sigs/tree/main/builder-keys), and the archive must match its checksum, or the build fails. |
 | **Every release** | One tag per Bitcoin Core release since 22.0, plus `latest`. Multi-arch: `linux/amd64` and `linux/arm64`. |
-| **Your data is always persisted** | `bitcoind` refuses to start unless its data directory is a bind mount or a named volume. No more blockchains (or wallets!) lost with a deleted container. |
+| **Your data is always persisted** | `bitcoind` refuses to start unless its data directory is a bind mount or a named volume. No more blockchains (or wallets!) lost with a deleted container, and no disk filled by data you cannot see. |
 | **Clean shutdown** | `bitcoind` runs as PID 1 and receives `docker stop`'s `SIGTERM` directly, so it flushes its caches and closes its databases before exiting. No corrupted chainstate, no reindex. |
 | **Runs as your host user** | Set `B_UID` / `B_GID` and the blockchain, wallets and `.cookie` on the host belong to a real host user, which makes backups, restores and host-side tools (`bitcoin-cli`, Electrum servers, explorers) straightforward. |
 | **Unprivileged** | `bitcoind` never runs as root. |
@@ -79,13 +79,29 @@ All tags: https://hub.docker.com/r/romeujr/bitcoin-core/tags
 
 The data directory is `/home/bitcoin/.bitcoin`. It contains the blocks, the chainstate, the indexes, the wallets, `bitcoin.conf`, `debug.log` and the RPC `.cookie`.
 
-The container **will not start `bitcoind`** if that directory (or one of its parent directories) is not a mount. This is deliberate: without a mount everything would be written to the container's writable layer and silently lost when the container is removed or recreated (for example by `docker compose up` after an image upgrade).
+A node can take days to sync and needs hundreds of GB, so the entrypoint checks where that directory lives **before** starting `bitcoind`, and stops the container with a clear error when the data would be lost or would fill your disk unnoticed:
+
+| The data directory is... | Result |
+|---|---|
+| a **bind mount** of a host directory on disk (`-v /srv/bitcoin:...`) | Starts. |
+| a **named volume** (`-v bitcoin-data:...`) | Starts. |
+| **not mounted** (container's writable layer) | **Refused.** Data would grow inside Docker's storage without any visible volume and be lost when the container is removed or recreated (e.g. by `docker compose up` after an image upgrade). |
+| an **anonymous volume** (`-v /home/bitcoin/.bitcoin`, without a name or host path) | **Refused.** It gets a random name, is easy to lose track of while it fills the disk, and is deleted by `docker run --rm` and `docker volume prune`. The error shows how to copy its data into a named volume. |
+| **in memory** (`--tmpfs`, or a host directory on tmpfs such as `/tmp` on many systems) | **Refused**, except with `-regtest`. Lost at every stop or reboot. |
+| mounted **read-only** (`:ro`) | **Refused.** `bitcoind` must write to it. |
+| not **writable** by `B_UID:B_GID` | **Refused**, with the owner, the mode and the exact fix. |
+
+For example:
 
 ```text
 [entrypoint] ERROR: the data directory "/home/bitcoin/.bitcoin" is not on a Docker volume or bind mount.
 
-  bitcoind will NOT start: the blockchain, the wallets and all node state would
-  be written to the container's writable layer and lost with the container.
+  The blockchain, the wallets and all node state would be written to the
+  container's writable layer: they would fill Docker's storage without any
+  visible volume and be lost when the container is removed or recreated.
+
+  Bind mount a host directory:
+    docker run -d --name bitcoind -v /path/on/host:/home/bitcoin/.bitcoin romeujr/bitcoin-core:30.0
   ...
 ```
 
@@ -101,10 +117,14 @@ Use either:
 
 Notes:
 
-- The image intentionally has **no `VOLUME` instruction**, which would otherwise create an anonymous volume behind your back and defeat this check.
-- If the host directory does not exist yet, Docker creates it owned by `root`. The entrypoint detects an **empty** directory that `bitcoind` cannot write to and hands it to `B_UID:B_GID`. A **non-empty** directory is never changed: you get an error explaining how to fix the ownership.
-- To use another path, either set `-e BITCOIN_DATA=/data/bitcoin` or pass `-datadir=/data/bitcoin`; the mount check applies to that path.
-- **Throwaway nodes only** (e.g. `-regtest` in CI): opt out with `-e B_ALLOW_EPHEMERAL_DATA=true`. A warning is printed and all data is lost with the container.
+- The image intentionally has **no `VOLUME` instruction**, which would otherwise create an anonymous volume behind your back.
+- If the host directory does not exist yet, Docker creates it owned by `root`. The entrypoint detects an **empty** directory that `bitcoind` cannot write to and hands it to `B_UID:B_GID`. A **non-empty** directory is never changed.
+- To use another path, either set `-e BITCOIN_DATA=/data/bitcoin` or pass `-datadir=/data/bitcoin`; the checks apply to that path. Mounting a parent directory (e.g. `-v /srv:/data` with `BITCOIN_DATA=/data/bitcoin`) also works.
+- **Throwaway regtest nodes** (e.g. in CI) can run in memory, so nothing is left on disk:
+
+  ```bash
+  docker run --rm --tmpfs /home/bitcoin/.bitcoin romeujr/bitcoin-core:latest -regtest
+  ```
 
 ---
 
@@ -399,7 +419,6 @@ The entrypoint prints a short summary before starting (RPC passwords are masked)
 | `B_UID` | `1000` | User id `bitcoind` runs as. |
 | `B_GID` | `1000` | Group id `bitcoind` runs as. |
 | `BITCOIN_DATA` | `/home/bitcoin/.bitcoin` | Data directory (must be a mount). Overridden by `-datadir=...`. |
-| `B_ALLOW_EPHEMERAL_DATA` | `false` | `true` allows running without a mount. **All data is lost with the container.** |
 | `BITCOIN_VERSION` | *(the image's version)* | Informational, read-only. |
 
 ### Ports
@@ -412,7 +431,7 @@ The entrypoint prints a short summary before starting (RPC passwords are masked)
 | signet | 38332 | 38333 |
 | regtest | 18443 | 18444 |
 
-Only publish what you need. P2P can be public; **RPC should never be published on a public interface** (use `127.0.0.1:8332:8332` or a Docker network).
+The image does not declare any port (no `EXPOSE`), so nothing is published unless you decide to, with `-p` / `ports:`; even `docker run -P` publishes nothing. Only publish what you need: P2P can be public, but **RPC should never be published on a public interface** (use `127.0.0.1:8332:8332` or a Docker network). Containers on the same Docker network reach each other's listening ports without any publishing.
 
 ### Command
 
@@ -501,7 +520,7 @@ The build fails if the signatures or the checksum do not verify. The scripts use
 
 ## Image changelog
 
-- **2026-11** — `bitcoind` now runs as PID 1 and shuts down cleanly on `docker stop` (previously the entrypoint did not forward signals and the node was terminated without its shutdown sequence); release binaries are verified with the builders' GPG signatures and SHA-256 checksums; `B_UID`/`B_GID` no longer change file ownership recursively and accept group ids already in use; empty data directories created by Docker are handed to `B_UID:B_GID`; clear errors for unwritable data directories and for `-daemon`; `-help`/`-version` and the bundled tools work without a volume; Bitcoin Core binaries on the `PATH`; `-rpcpassword` masked in the start-up summary; GUI and test binaries removed.
+- **2026-11** — `bitcoind` now runs as PID 1 and shuts down cleanly on `docker stop` (previously the entrypoint did not forward signals and the node was terminated without its shutdown sequence); release binaries are verified with the builders' GPG signatures and SHA-256 checksums; `B_UID`/`B_GID` no longer change file ownership recursively and accept group ids already in use; empty data directories created by Docker are handed to `B_UID:B_GID`; the data directory is also refused on anonymous volumes, in-memory filesystems (except `-regtest`) and read-only mounts; clear errors for unwritable data directories and for `-daemon`; `-help`/`-version` and the bundled tools work without a volume; Bitcoin Core binaries on the `PATH`; `-rpcpassword` masked in the start-up summary; GUI and test binaries removed.
 - **Earlier** — `B_UID`/`B_GID` support; refuse to start without a mounted data directory.
 
 ---

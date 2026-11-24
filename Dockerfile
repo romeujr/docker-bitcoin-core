@@ -43,7 +43,6 @@ LABEL org.opencontainers.image.title="bitcoin-core" \
 
 ENV B_UID=1000 \
     B_GID=1000 \
-    B_ALLOW_EPHEMERAL_DATA=false \
     BITCOIN_DATA=/home/bitcoin/.bitcoin \
     BITCOIN_VERSION=${P_BITCOIN_VERSION} \
     DEBIAN_FRONTEND=noninteractive \
@@ -168,19 +167,39 @@ readonly IMAGE=romeujr/bitcoin-core
 B_UID="${B_UID:-1000}"
 B_GID="${B_GID:-1000}"
 BITCOIN_DATA="${BITCOIN_DATA:-${DEFAULT_DATA}}"
-B_ALLOW_EPHEMERAL_DATA="${B_ALLOW_EPHEMERAL_DATA:-false}"
+TAG="${IMAGE}:${BITCOIN_VERSION:-latest}"
 
 log()  { echo "[entrypoint] $*"; }
 warn() { echo "[entrypoint] WARNING: $*" >&2; }
 die()  { echo "[entrypoint] ERROR: $*" >&2; exit 1; }
 
-is_true() { case "${1,,}" in 1|true|yes|on) return 0 ;; *) return 1 ;; esac; }
+# Prints a detailed error (title in $1, details on stdin) and stops the container.
+die_block() {
+  {
+    echo ""
+    echo "[entrypoint] ERROR: $1"
+    echo ""
+    cat
+    echo ""
+    echo "  bitcoind was NOT started. Documentation: ${REPO_URL}#persistent-data-mandatory"
+    echo ""
+  } >&2
+  exit 1
+}
 
-# True when the directory, or one of its parents (except "/"), is a mount point.
-is_persisted() {
-  local dir="$1"
+# Finds the mount holding a directory: the directory itself or its nearest
+# parent (except "/"). Prints "<source root> <fs type> <mount options> <mount point>".
+find_mount() {
+  local dir="$1" info
   while [ -n "${dir}" ] && [ "${dir}" != "/" ]; do
-    if awk -v d="${dir}" '$5 == d { found = 1 } END { exit !found }' /proc/self/mountinfo; then
+    info="$(awk -v d="${dir}" '
+      $5 == d {
+        root = $4; opts = $6; fstype = "?"
+        for (i = 7; i <= NF; i++) if ($i == "-") { fstype = $(i + 1); break }
+      }
+      END { if (root != "") print root, fstype, opts }' /proc/self/mountinfo)"
+    if [ -n "${info}" ]; then
+      echo "${info} ${dir}"
       return 0
     fi
     dir="$(dirname "${dir}")"
@@ -189,30 +208,59 @@ is_persisted() {
 }
 
 no_volume_error() {
-  cat >&2 <<MSG
-
-[entrypoint] ERROR: the data directory "$1" is not on a Docker volume or bind mount.
-
-  bitcoind will NOT start: the blockchain, the wallets and all node state would
-  be written to the container's writable layer and lost with the container.
+  die_block "the data directory \"$1\" is not on a Docker volume or bind mount." <<MSG
+  The blockchain, the wallets and all node state would be written to the
+  container's writable layer: they would fill Docker's storage without any
+  visible volume and be lost when the container is removed or recreated.
 
   Bind mount a host directory:
-    docker run -d --name bitcoind -v /path/on/host:$1 ${IMAGE}:${BITCOIN_VERSION:-latest} [bitcoind options]
+    docker run -d --name bitcoind -v /path/on/host:$1 ${TAG}
 
   Or use a named volume:
-    docker run -d --name bitcoind -v bitcoin-data:$1 ${IMAGE}:${BITCOIN_VERSION:-latest} [bitcoind options]
+    docker run -d --name bitcoind -v bitcoin-data:$1 ${TAG}
 
-  For throwaway nodes only (e.g. -regtest in CI), opt out explicitly with:
-    -e B_ALLOW_EPHEMERAL_DATA=true
+  For a throwaway -regtest node (e.g. in CI), an in-memory mount is accepted:
+    docker run --rm --tmpfs $1 ${TAG} -regtest
 
-  Image documentation:   ${REPO_URL}
-                         ${HUB_URL}
   Docker run reference:  https://docs.docker.com/reference/cli/docker/container/run/
   Bitcoin Core options:  run this image with -help (add -help-debug for more)
   Release notes:         https://github.com/bitcoin/bitcoin/blob/master/doc/release-notes/release-notes-${BITCOIN_VERSION:-}.md
-
 MSG
-  exit 1
+}
+
+anonymous_volume_error() {
+  die_block "the data directory \"$1\" is on an ANONYMOUS Docker volume." <<MSG
+  Anonymous volumes are created by a mount without a name or host path
+  (such as "-v $2") or by a VOLUME instruction in a derived image.
+  They get a random name, here:
+    $3
+  They are easy to lose track of while they fill up disk space, and are
+  deleted by "docker run --rm" and by "docker volume prune".
+
+  Give the volume a name:
+    -v bitcoin-data:$2
+  or bind mount a host directory:
+    -v /path/on/host:$2
+
+  To keep data already synced into this volume, stop the container and copy it:
+    docker run --rm -v $3:/from -v bitcoin-data:/to ${TAG} cp -a /from/. /to/
+MSG
+}
+
+memory_fs_error() {
+  die_block "the data directory \"$1\" is on an in-memory filesystem (${3})." <<MSG
+  Its content is lost every time the container stops or the host reboots,
+  and a blockchain does not fit in memory. This happens with
+  "--tmpfs $2", or when a host directory that lives in memory
+  (such as /tmp on many systems) is bind mounted.
+
+  In-memory data directories are only accepted with -regtest (e.g. in CI).
+
+  Use a named volume:
+    -v bitcoin-data:$2
+  or bind mount a host directory on disk:
+    -v /path/on/disk:$2
+MSG
 }
 
 # ---------------------------------------------------------------------------
@@ -225,6 +273,8 @@ fi
 run_node=false
 help_only=false
 datadir_arg=""
+conf_arg=""
+regtest=false
 case "$1" in
   bitcoind) run_node=true ;;
   bitcoin)  for arg in "${@:2}"; do [ "${arg}" = "node" ] && run_node=true; done ;;
@@ -237,6 +287,10 @@ if ${run_node}; then
         help_only=true ;;
       -datadir=*|--datadir=*)
         datadir_arg="${arg#*=}" ;;
+      -conf=*|--conf=*)
+        conf_arg="${arg#*=}" ;;
+      -regtest|--regtest|-regtest=[1-9]*|--regtest=[1-9]*|-chain=regtest|--chain=regtest)
+        regtest=true ;;
       -daemon|--daemon|-daemon=[1-9]*|--daemon=[1-9]*|-daemonwait|--daemonwait|-daemonwait=[1-9]*|--daemonwait=[1-9]*)
         die "\"${arg}\" is not supported in a container: bitcoind must stay in the foreground (it is the container's main process)." ;;
     esac
@@ -288,13 +342,46 @@ fi
 # ---------------------------------------------------------------------------
 DATA_DIR="$(realpath -m "${datadir_arg:-${BITCOIN_DATA}}")"
 
-if ! is_persisted "${DATA_DIR}"; then
-  if is_true "${B_ALLOW_EPHEMERAL_DATA}"; then
-    warn "${DATA_DIR} is not on a volume (B_ALLOW_EPHEMERAL_DATA=${B_ALLOW_EPHEMERAL_DATA}): ALL DATA WILL BE LOST when the container is removed."
-  else
-    no_volume_error "${DATA_DIR}"
+# Regtest can also be selected in a configuration file.
+case "${conf_arg}" in
+  ""|/*) ;;
+  *) conf_arg="${DATA_DIR}/${conf_arg}" ;;
+esac
+for conf in "${conf_arg}" "${DATA_DIR}/bitcoin.conf"; do
+  if [ -n "${conf}" ] && [ -r "${conf}" ] \
+    && grep -qE '^[[:space:]]*(regtest[[:space:]]*=[[:space:]]*[1-9]|chain[[:space:]]*=[[:space:]]*regtest)' "${conf}"; then
+    regtest=true
   fi
+done
+
+if ! MOUNT_INFO="$(find_mount "${DATA_DIR}")"; then
+  no_volume_error "${DATA_DIR}"
 fi
+read -r MOUNT_ROOT MOUNT_FSTYPE MOUNT_OPTS MOUNT_POINT <<< "${MOUNT_INFO}"
+
+if [[ "${MOUNT_ROOT}" =~ /volumes/([0-9a-f]{64})/_data$ ]]; then
+  anonymous_volume_error "${DATA_DIR}" "${MOUNT_POINT}" "${BASH_REMATCH[1]}"
+fi
+
+case "${MOUNT_FSTYPE}" in
+  tmpfs|ramfs)
+    if ${regtest}; then
+      warn "${DATA_DIR} is in memory (${MOUNT_FSTYPE}): this regtest chain is lost when the container stops."
+    else
+      memory_fs_error "${DATA_DIR}" "${MOUNT_POINT}" "${MOUNT_FSTYPE}"
+    fi
+    ;;
+esac
+
+case ",${MOUNT_OPTS}," in
+  *,ro,*)
+    die_block "the data directory \"${DATA_DIR}\" is mounted read-only." <<MSG
+  bitcoind must write to its data directory (blocks, chainstate, wallets, logs).
+  Remove ":ro" (or "read_only: true" in Docker Compose) from the mount of
+  ${MOUNT_POINT}.
+MSG
+    ;;
+esac
 
 if [ ! -d "${DATA_DIR}" ]; then
   "${run_as[@]}" mkdir -p "${DATA_DIR}" 2>/dev/null \
@@ -308,9 +395,15 @@ if ! "${run_as[@]}" test -w "${DATA_DIR}" -a -x "${DATA_DIR}"; then
     chown "${B_UID}:${B_GID}" "${DATA_DIR}"
     log "${DATA_DIR} was empty and not writable: its owner was set to ${B_UID}:${B_GID}."
   else
-    die "the data directory ${DATA_DIR} (owner $(stat -c '%u:%g' "${DATA_DIR}"), mode $(stat -c '%a' "${DATA_DIR}")) is not writable by uid=${B_UID} gid=${B_GID}.
-  Either run the container with the owner's ids:  -e B_UID=<uid> -e B_GID=<gid>  (or --user <uid>:<gid>)
-  or change the owner on the host:                 sudo chown -R ${B_UID}:${B_GID} /path/on/host"
+    OWNER="$(stat -c '%u:%g' "${DATA_DIR}")"
+    die_block "the data directory \"${DATA_DIR}\" is not writable by uid=${B_UID} gid=${B_GID}." <<MSG
+  It is owned by ${OWNER} with mode $(stat -c '%a' "${DATA_DIR}").
+
+  Run the container as the owner of the data:
+    -e B_UID=${OWNER%:*} -e B_GID=${OWNER#*:}
+  or give the data to uid ${B_UID} on the host (can take a while on a full node):
+    sudo chown -R ${B_UID}:${B_GID} /path/on/host
+MSG
   fi
 fi
 
@@ -367,8 +460,8 @@ apt-get clean
 rm -rf /var/lib/apt/lists/* "${WORK}" /tmp/* /var/tmp/* /root/.gnupg
 EOF
 
-# Mainnet, testnet3, testnet4, signet and regtest (RPC and P2P).
-EXPOSE 8332 8333 18332 18333 48332 48333 38332 38333 18443 18444
+# No EXPOSE on purpose: the person running the container decides which ports
+# are published ("-p" / "ports:"); "docker run -P" publishes nothing.
 
 # bitcoind handles SIGTERM by shutting down cleanly. Give it time with
 # "docker stop -t 600" or "stop_grace_period: 10m" (Docker Compose).
