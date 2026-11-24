@@ -1,0 +1,126 @@
+# Publishes images to Docker Hub and GHCR: multi-platform, with SBOM and
+# provenance attestations, signed with cosign (keyless).
+#
+# - push to main changing versions.txt: publishes the versions added there
+#   (and moves "latest" if the newest one was added);
+# - monthly: rebuilds the supported versions to pick up Debian security updates;
+# - manually: "supported", "latest", "all" or a list such as "30.4 31.2".
+#
+# Repository secrets: DOCKERHUB_USERNAME, DOCKERHUB_TOKEN (see docs/publishing.md).
+name: Publish
+
+on:
+  push:
+    branches: [main]
+    paths: [versions.txt]
+  schedule:
+    - cron: "0 6 1 * *"
+  workflow_dispatch:
+    inputs:
+      versions:
+        description: 'Versions: "supported", "latest", "all" or a space-separated list (e.g. "30.4 31.2")'
+        required: true
+        default: supported
+
+permissions:
+  contents: read
+
+concurrency:
+  group: publish
+  cancel-in-progress: false
+
+env:
+  DOCKERHUB_IMAGE: docker.io/romeujr/bitcoin-core
+  GHCR_IMAGE: ghcr.io/romeujr/bitcoin-core
+
+jobs:
+  plan:
+    runs-on: ubuntu-24.04
+    outputs:
+      versions: ${{ steps.plan.outputs.versions }}
+      latest: ${{ steps.plan.outputs.latest }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - id: plan
+        env:
+          EVENT: ${{ github.event_name }}
+          INPUT: ${{ github.event.inputs.versions }}
+        run: |
+          case "${EVENT}" in
+            schedule) list="$(bash versions.sh supported)" ;;
+            push)     list="$(git diff HEAD^ HEAD -- versions.txt | sed -nE 's/^\+[[:space:]]*([0-9][0-9.]*)[[:space:]]*$/\1/p')" ;;
+            *)        case "${INPUT}" in
+                        supported|latest|all) list="$(bash versions.sh "${INPUT}")" ;;
+                        *) list="${INPUT}" ;;
+                      esac ;;
+          esac
+          known="$(bash versions.sh all)"
+          for version in ${list}; do
+            if ! grep -qx "${version}" <<< "${known}"; then
+              echo "::error::${version} is not listed in versions.txt"
+              exit 1
+            fi
+          done
+          versions="$(tr -s '[:space:]' '\n' <<< "${list}" | jq -R . | jq -cs 'map(select(length > 0))')"
+          echo "Versions to publish: ${versions}"
+          echo "versions=${versions}" >> "${GITHUB_OUTPUT}"
+          echo "latest=$(bash versions.sh latest)" >> "${GITHUB_OUTPUT}"
+
+  publish:
+    needs: plan
+    if: needs.plan.outputs.versions != '[]'
+    name: publish ${{ matrix.version }}
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+    strategy:
+      fail-fast: false
+      max-parallel: 4
+      matrix:
+        version: ${{ fromJSON(needs.plan.outputs.versions) }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Smoke test (amd64) before publishing
+        env:
+          VERSION: ${{ matrix.version }}
+        run: |
+          docker buildx build --load --build-arg P_BITCOIN_VERSION="${VERSION}" -t bitcoin-core:test .
+          bash tests/smoke.sh bitcoin-core:test
+
+      - uses: docker/setup-qemu-action@v3
+
+      - uses: docker/setup-buildx-action@v3
+        id: buildx
+
+      - uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: sigstore/cosign-installer@v3
+
+      - name: Build, push and sign
+        env:
+          IMAGES: ${{ env.DOCKERHUB_IMAGE }} ${{ env.GHCR_IMAGE }}
+          BUILDER: ${{ steps.buildx.outputs.name }}
+          SIGN: "true"
+          VERSION: ${{ matrix.version }}
+          LATEST: ${{ needs.plan.outputs.latest }}
+        run: |
+          if [ "${VERSION}" = "${LATEST}" ]; then
+            bash build-version.sh "${VERSION}" --latest
+          else
+            bash build-version.sh "${VERSION}"
+          fi

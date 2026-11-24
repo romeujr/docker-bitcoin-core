@@ -12,15 +12,23 @@
 #
 # Build (any platform supported by Bitcoin Core release binaries):
 #
-#   docker buildx build --build-arg P_BITCOIN_VERSION=30.0 -t bitcoin-core:30.0 .
+#   docker buildx build --build-arg P_BITCOIN_VERSION=32.1 -t bitcoin-core:32.1 .
 #
 # Build arguments:
-#   P_BITCOIN_VERSION  (required) Bitcoin Core version, e.g. 30.0, 29.1, 24.0.1
+#   P_BITCOIN_VERSION  (required) Bitcoin Core version, e.g. 32.1, 29.1, 24.0.1
 #   P_TARGETPLATFORM   (optional) linux/amd64 | linux/arm64 | linux/arm/v7 |
 #                      linux/ppc64le | linux/riscv64. Defaults to the platform
 #                      being built (BuildKit's TARGETPLATFORM).
 #   P_MIN_SIGNATURES   (optional) Minimum number of valid builder signatures
 #                      required on SHA256SUMS (default: 3).
+#   P_GUIX_SIGS_REF    (optional) Branch, tag or commit of
+#                      github.com/bitcoin-core/guix.sigs providing the builder
+#                      keys (default: main). Pin a commit for reproducible builds.
+#   P_REVISION         (optional) Commit of this repository, stored as a label.
+#
+# Helper inside the image:
+#   /opt/healthcheck.sh [liveness|readiness]  probe for Docker, Compose,
+#                      Kubernetes, ECS... (not enabled by default).
 #
 # NOTE: there is deliberately NO "VOLUME" instruction. A VOLUME would silently
 # create an anonymous volume, defeating the entrypoint check that refuses to run
@@ -32,8 +40,12 @@ ARG TARGETPLATFORM
 ARG P_TARGETPLATFORM
 ARG P_BITCOIN_VERSION
 ARG P_MIN_SIGNATURES=3
+ARG P_GUIX_SIGS_REF=main
+ARG P_REVISION=""
 
 LABEL org.opencontainers.image.title="bitcoin-core" \
+      org.opencontainers.image.revision="${P_REVISION}" \
+      io.github.romeujr.bitcoin-core.guix-sigs-ref="${P_GUIX_SIGS_REF}" \
       org.opencontainers.image.description="Bitcoin Core (bitcoind) with GPG-verified release binaries, configurable UID/GID, mandatory persistent data directory and graceful shutdown." \
       org.opencontainers.image.version="${P_BITCOIN_VERSION}" \
       org.opencontainers.image.url="https://hub.docker.com/r/romeujr/bitcoin-core" \
@@ -57,7 +69,7 @@ set -euo pipefail
 #    release archive name.
 # --------------------------------------------------------------------------
 if [ -z "${P_BITCOIN_VERSION:-}" ]; then
-  echo "ERROR: build argument P_BITCOIN_VERSION is required, e.g. --build-arg P_BITCOIN_VERSION=30.0" >&2
+  echo "ERROR: build argument P_BITCOIN_VERSION is required, e.g. --build-arg P_BITCOIN_VERSION=32.1" >&2
   exit 1
 fi
 
@@ -99,7 +111,8 @@ BASE_URL="https://bitcoincore.org/bin/bitcoin-core-${P_BITCOIN_VERSION}"
 ARCHIVE="bitcoin-${P_BITCOIN_VERSION}-${ARCH}.tar.gz"
 
 curl -fsSL --remote-name-all "${BASE_URL}/${ARCHIVE}" "${BASE_URL}/SHA256SUMS" "${BASE_URL}/SHA256SUMS.asc"
-curl -fsSL https://github.com/bitcoin-core/guix.sigs/archive/refs/heads/main.tar.gz \
+echo "Builder keys from github.com/bitcoin-core/guix.sigs at '${P_GUIX_SIGS_REF}'."
+curl -fsSL "https://github.com/bitcoin-core/guix.sigs/archive/${P_GUIX_SIGS_REF}.tar.gz" \
   | tar -xz --wildcards --strip-components=1 '*/builder-keys/*'
 
 export GNUPGHOME="${WORK}/gnupg"
@@ -161,7 +174,6 @@ set -euo pipefail
 
 readonly DEFAULT_DATA=/home/bitcoin/.bitcoin
 readonly REPO_URL=https://github.com/romeujr/docker-bitcoin-core
-readonly HUB_URL=https://hub.docker.com/r/romeujr/bitcoin-core
 readonly IMAGE=romeujr/bitcoin-core
 
 B_UID="${B_UID:-1000}"
@@ -263,12 +275,46 @@ memory_fs_error() {
 MSG
 }
 
+pod_storage_error() {
+  die_block "the data directory \"$1\" is on a Kubernetes emptyDir volume." <<MSG
+  An emptyDir is deleted with its Pod: a rescheduled, evicted or updated Pod
+  starts again from an empty data directory, and the node resyncs from scratch.
+
+  Use a PersistentVolumeClaim (e.g. volumeClaimTemplates in a StatefulSet)
+  mounted at $2.
+
+  emptyDir volumes are only accepted with -regtest (e.g. in CI).
+  Kubernetes guide: ${REPO_URL}/blob/main/docs/kubernetes.md
+MSG
+}
+
+# Value of a numeric bitcoind option: command line, then configuration files,
+# then the default printed by "bitcoind -help".
+option_value() {
+  local name="$1" value="" conf arg found
+  for conf in "${DATA_DIR}/bitcoin.conf" "${conf_arg}"; do
+    if [ -n "${conf}" ] && [ -r "${conf}" ]; then
+      found="$(sed -nE "s/^[[:space:]]*${name}[[:space:]]*=[[:space:]]*([0-9]+).*/\1/p" "${conf}" | tail -n 1)"
+      [ -z "${found}" ] || value="${found}"
+    fi
+  done
+  for arg in "${NODE_ARGS[@]}"; do
+    case "${arg}" in -"${name}"=*|--"${name}"=*) value="${arg#*=}" ;; esac
+  done
+  if ! [[ "${value}" =~ ^[0-9]+$ ]]; then
+    value="$(bitcoind -help 2>/dev/null | tr -s ' \n' ' ' \
+      | grep -oE -- "-${name}=<n> [^)]*default: [0-9]+" | grep -oE '[0-9]+$' | sed -n 1p || true)"
+  fi
+  echo "${value}"
+}
+
 # ---------------------------------------------------------------------------
 # What to run
 # ---------------------------------------------------------------------------
 if [ $# -eq 0 ] || [ "${1:0:1}" = "-" ]; then
   set -- bitcoind "$@"
 fi
+NODE_ARGS=("${@:2}")
 
 run_node=false
 help_only=false
@@ -373,6 +419,14 @@ case "${MOUNT_FSTYPE}" in
     ;;
 esac
 
+if [[ "${MOUNT_ROOT}" == *"/kubernetes.io~empty-dir/"* ]]; then
+  if ${regtest}; then
+    warn "${DATA_DIR} is on a Kubernetes emptyDir: this regtest chain is lost with the Pod."
+  else
+    pod_storage_error "${DATA_DIR}" "${MOUNT_POINT}"
+  fi
+fi
+
 case ",${MOUNT_OPTS}," in
   *,ro,*)
     die_block "the data directory \"${DATA_DIR}\" is mounted read-only." <<MSG
@@ -407,14 +461,36 @@ MSG
   fi
 fi
 
+# With B_UID/B_GID, files on the host should belong to that user. (Not checked
+# with "--user" / Kubernetes runAsUser, where group access via fsGroup is normal.)
 DATA_OWNER="$(stat -c '%u:%g' "${DATA_DIR}")"
-if [ "${DATA_OWNER}" != "${B_UID}:${B_GID}" ]; then
+if [ "$(id -u)" = "0" ] && [ "${DATA_OWNER}" != "${B_UID}:${B_GID}" ]; then
   warn "${DATA_DIR} is owned by ${DATA_OWNER}, but bitcoind runs as ${B_UID}:${B_GID}. Consider -e B_UID=${DATA_OWNER%:*} -e B_GID=${DATA_OWNER#*:}."
 fi
 
 if [ -r "${DATA_DIR}/bitcoin.conf" ] \
   && grep -qE '^[[:space:]]*daemon(wait)?[[:space:]]*=[[:space:]]*[1-9]' "${DATA_DIR}/bitcoin.conf"; then
   die "${DATA_DIR}/bitcoin.conf sets daemon=1, which is not supported in a container: remove that line."
+fi
+
+# Memory limit: if bitcoind outgrows it, the kernel kills it (OOM) and the
+# shutdown is as unclean as a "docker kill". Warn when caches may not fit.
+MEM_LIMIT=""
+if [ -r /sys/fs/cgroup/memory.max ]; then
+  MEM_LIMIT="$(cat /sys/fs/cgroup/memory.max)"
+elif [ -r /sys/fs/cgroup/memory/memory.limit_in_bytes ]; then
+  MEM_LIMIT="$(cat /sys/fs/cgroup/memory/memory.limit_in_bytes)"
+fi
+if [[ "${MEM_LIMIT}" =~ ^[0-9]+$ ]] && [ "${MEM_LIMIT}" -lt 1099511627776 ]; then
+  DBCACHE="$(option_value dbcache)"
+  MAXMEMPOOL="$(option_value maxmempool)"
+  if [[ "${DBCACHE}" =~ ^[0-9]+$ ]] && [[ "${MAXMEMPOOL}" =~ ^[0-9]+$ ]]; then
+    LIMIT_MIB=$(( MEM_LIMIT / 1048576 ))
+    NEEDED_MIB=$(( DBCACHE + MAXMEMPOOL + 512 ))
+    if [ "${LIMIT_MIB}" -lt "${NEEDED_MIB}" ]; then
+      warn "the container memory limit is ${LIMIT_MIB} MiB, but bitcoind may need about ${NEEDED_MIB} MiB (dbcache ${DBCACHE} + maxmempool ${MAXMEMPOOL} + ~512 for the rest). If it runs out of memory it is killed without a clean shutdown: lower -dbcache / -maxmempool or raise the limit."
+    fi
+  fi
 fi
 
 # Always tell bitcoind which directory was checked above.
@@ -450,7 +526,85 @@ chmod 0755 /opt/entry-point.sh
 bash -n /opt/entry-point.sh
 
 # --------------------------------------------------------------------------
-# 7. Clean up: drop build-only packages, apt lists and temporary files.
+# 7. Health check helper (opt-in: Docker HEALTHCHECK, Compose healthcheck,
+#    Kubernetes probes, ECS health checks...).
+# --------------------------------------------------------------------------
+cat > /opt/healthcheck.sh <<'SCRIPT'
+#!/bin/bash
+#
+# Health check of the romeujr/bitcoin-core image.
+# https://github.com/romeujr/docker-bitcoin-core
+#
+# Usage: /opt/healthcheck.sh [liveness|readiness]
+#
+#   liveness   bitcoind is running and its RPC server answers (also while it
+#              is still loading the block index or rescanning at start-up).
+#   readiness  in addition, the node has finished its initial block download.
+#
+# The network (-chain, -testnet4, -signet, -regtest...), data directory, RPC
+# port and credentials are taken from the running bitcoind's own command line,
+# and bitcoin-cli reads bitcoin.conf as usual, so no arguments are needed.
+
+set -uo pipefail
+
+mode="${1:-liveness}"
+case "${mode}" in
+  liveness|readiness) ;;
+  *) echo "usage: $0 [liveness|readiness]" >&2; exit 2 ;;
+esac
+
+pid=""
+for proc in /proc/[0-9]*; do
+  if [ "$(cat "${proc}/comm" 2>/dev/null)" = "bitcoind" ]; then
+    pid="${proc#/proc/}"
+    break
+  fi
+done
+if [ -z "${pid}" ]; then
+  echo "unhealthy: bitcoind is not running"
+  exit 1
+fi
+
+cli=(bitcoin-cli -rpcclienttimeout=10)
+while IFS= read -r -d '' arg; do
+  case "${arg}" in
+    -datadir=*|--datadir=*|-conf=*|--conf=*|-chain=*|--chain=*|\
+    -regtest|--regtest|-regtest=*|--regtest=*|-testnet|--testnet|-testnet=*|--testnet=*|\
+    -testnet4|--testnet4|-testnet4=*|--testnet4=*|-signet|--signet|-signet=*|--signet=*|\
+    -rpcport=*|--rpcport=*|-rpccookiefile=*|--rpccookiefile=*|-rpcuser=*|--rpcuser=*|-rpcpassword=*|--rpcpassword=*)
+      cli+=("${arg}") ;;
+  esac
+done < "/proc/${pid}/cmdline"
+
+if ! out="$("${cli[@]}" getblockchaininfo 2>&1)"; then
+  if [[ "${out}" == *"error code: -28"* ]]; then
+    # RPC_IN_WARMUP: alive, still starting (loading blocks, verifying...).
+    if [ "${mode}" = "liveness" ]; then
+      echo "healthy: bitcoind is starting ($(echo "${out}" | tail -n 1))"
+      exit 0
+    fi
+    echo "not ready: bitcoind is starting ($(echo "${out}" | tail -n 1))"
+    exit 1
+  fi
+  echo "unhealthy: RPC is not answering: $(echo "${out}" | tail -n 1)"
+  exit 1
+fi
+
+if [ "${mode}" = "readiness" ] && [[ "${out}" != *'"initialblockdownload": false'* ]]; then
+  progress="$(echo "${out}" | sed -nE 's/.*"verificationprogress": ([0-9.e-]+).*/\1/p')"
+  echo "not ready: initial block download in progress (verificationprogress ${progress:-?})"
+  exit 1
+fi
+
+blocks="$(echo "${out}" | sed -nE 's/.*"blocks": ([0-9]+).*/\1/p')"
+echo "healthy: ${mode} ok, ${blocks:-?} blocks"
+exit 0
+SCRIPT
+chmod 0755 /opt/healthcheck.sh
+bash -n /opt/healthcheck.sh
+
+# --------------------------------------------------------------------------
+# 8. Clean up: drop build-only packages, apt lists and temporary files.
 # --------------------------------------------------------------------------
 cd /
 apt-mark auto '.*' > /dev/null

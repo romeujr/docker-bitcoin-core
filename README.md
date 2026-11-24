@@ -3,14 +3,18 @@
 [![Docker Pulls](https://img.shields.io/docker/pulls/romeujr/bitcoin-core?logo=docker)](https://hub.docker.com/r/romeujr/bitcoin-core)
 [![Docker Stars](https://img.shields.io/docker/stars/romeujr/bitcoin-core?logo=docker)](https://hub.docker.com/r/romeujr/bitcoin-core)
 [![Image Size](https://img.shields.io/docker/image-size/romeujr/bitcoin-core/latest?logo=docker)](https://hub.docker.com/r/romeujr/bitcoin-core/tags)
-[![GitHub](https://img.shields.io/badge/source-GitHub-181717?logo=github)](https://github.com/romeujr/docker-bitcoin-core)
+[![CI](https://github.com/romeujr/docker-bitcoin-core/actions/workflows/ci.yml/badge.svg)](https://github.com/romeujr/docker-bitcoin-core/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 
-Run **[Bitcoin Core](https://bitcoincore.org)** (`bitcoind`) in a small, isolated and reproducible Docker container, on any Linux host, NAS, server or Raspberry Pi, with the **official release binaries** and **every release since 22.0**.
+Run **[Bitcoin Core](https://bitcoincore.org)** (`bitcoind`) in a small, isolated and reproducible container, on a Linux host, NAS, Raspberry Pi, cloud VM or Kubernetes cluster, with the **official release binaries** and **every release since 22.0**.
 
 The image is built to be *boring and safe* for long-running nodes: your data is never left inside the container, the node always shuts down cleanly, and files on the host belong to the user you choose.
 
-- **Docker Hub:** https://hub.docker.com/r/romeujr/bitcoin-core
+- **Docker Hub:** [`romeujr/bitcoin-core`](https://hub.docker.com/r/romeujr/bitcoin-core)
+- **GitHub Container Registry:** [`ghcr.io/romeujr/bitcoin-core`](https://github.com/romeujr/docker-bitcoin-core/pkgs/container/bitcoin-core)
 - **Source:** https://github.com/romeujr/docker-bitcoin-core
+
+**Contents:** [Highlights](#highlights) · [Quick start](#quick-start) · [Tags, registries and supported versions](#tags-registries-and-supported-versions) · [Persistent data](#persistent-data-mandatory) · [Host user (B_UID / B_GID)](#running-as-your-host-user-b_uid--b_gid) · [Graceful shutdown](#graceful-shutdown) · [Configuring Bitcoin Core](#configuring-bitcoin-core) · [Docker Compose](#docker-compose) · [bitcoin-cli and tools](#using-bitcoin-cli-and-the-other-tools) · [Health checks](#health-checks) · [Memory and performance](#memory-and-performance) · [Kubernetes and cloud](#kubernetes-and-cloud) · [Logs](#logs) · [Reference](#reference) · [Security](#security) · [Extending](#extending-the-image) · [Building](#building-the-image-yourself) · [Migrating](#migrating) · [Changelog](#image-changelog)
 
 ---
 
@@ -23,7 +27,10 @@ The image is built to be *boring and safe* for long-running nodes: your data is 
 | **Your data is always persisted** | `bitcoind` refuses to start unless its data directory is a bind mount or a named volume. No more blockchains (or wallets!) lost with a deleted container, and no disk filled by data you cannot see. |
 | **Clean shutdown** | `bitcoind` runs as PID 1 and receives `docker stop`'s `SIGTERM` directly, so it flushes its caches and closes its databases before exiting. No corrupted chainstate, no reindex. |
 | **Runs as your host user** | Set `B_UID` / `B_GID` and the blockchain, wallets and `.cookie` on the host belong to a real host user, which makes backups, restores and host-side tools (`bitcoin-cli`, Electrum servers, explorers) straightforward. |
-| **Unprivileged** | `bitcoind` never runs as root. |
+| **Unprivileged** | `bitcoind` never runs as root. Compatible with the Kubernetes *restricted* Pod Security Standard (non-root, read-only root filesystem, no capabilities). |
+| **Signed, with SBOM and provenance** | Images published by GitHub Actions are signed with cosign and carry SBOM and SLSA provenance attestations. |
+| **Kept up to date** | The supported versions are rebuilt every month on a fresh Debian base for security updates, and every build is scanned and tested on amd64 and arm64. |
+| **Cloud ready** | Health check script for Docker, Compose, Kubernetes and ECS probes; a warning when the memory limit is too small for `-dbcache`; a [Kubernetes guide](docs/kubernetes.md). |
 | **Plain Bitcoin Core** | Every `bitcoind` option works as documented; the image adds no wrapper configuration. Logs go to `docker logs`. |
 | **One self-contained Dockerfile** | No scripts, no files to `COPY`, a single `RUN` layer: easy to audit, copy and customize. |
 
@@ -57,21 +64,32 @@ Any argument after the image name is passed to `bitcoind`:
 docker run --rm -v /srv/bitcoin:/home/bitcoin/.bitcoin romeujr/bitcoin-core -help
 ```
 
-> **Pin a version in production** (`romeujr/bitcoin-core:30.0`) instead of `latest`, and upgrade deliberately after reading the [release notes](https://github.com/bitcoin/bitcoin/tree/master/doc/release-notes).
+> **Pin a version in production** (`romeujr/bitcoin-core:32.1`) instead of `latest`, and upgrade deliberately after reading the [release notes](https://github.com/bitcoin/bitcoin/tree/master/doc/release-notes).
 
 ---
 
-## Supported tags and platforms
+## Tags, registries and supported versions
 
 | Tag | Description |
 |---|---|
-| `<version>` (e.g. `30.0`, `29.1`, `24.0.1`) | Multi-arch manifest (`linux/amd64` + `linux/arm64`) for that Bitcoin Core release. |
+| `<version>` (e.g. `32.1`, `29.1`, `24.0.1`) | Multi-arch image (`linux/amd64` + `linux/arm64`) for that Bitcoin Core release. |
 | `<version>-amd64`, `<version>-arm64` | Single-architecture images. |
 | `latest` | The most recent release. |
 
-All tags: https://hub.docker.com/r/romeujr/bitcoin-core/tags
+All tags: https://hub.docker.com/r/romeujr/bitcoin-core/tags. The list of versions is [`versions.txt`](versions.txt).
 
 `linux/arm64` runs on Raspberry Pi 4/5 (64-bit OS), Apple Silicon (Docker Desktop), AWS Graviton and similar hosts.
+
+**Registries.** The same images are published to Docker Hub and to the GitHub Container Registry. Use GHCR to avoid Docker Hub pull rate limits in clusters and CI:
+
+```bash
+docker pull romeujr/bitcoin-core:32.1
+docker pull ghcr.io/romeujr/bitcoin-core:32.1
+```
+
+**Supported versions.** Every tag stays available, but only the newest release of each of the **three newest major versions** (`bash versions.sh supported`) is rebuilt every month with Debian security updates. Older tags are frozen and may report vulnerabilities in base packages over time: upgrade to a supported version. Bitcoin Core's own maintenance policy is at https://bitcoincore.org/en/lifecycle/.
+
+> For immutable deployments, pin the digest: `romeujr/bitcoin-core:32.1@sha256:...` (`docker buildx imagetools inspect romeujr/bitcoin-core:32.1` shows it). A tag such as `32.1` keeps pointing to the newest rebuild of that version.
 
 ---
 
@@ -101,7 +119,7 @@ For example:
   visible volume and be lost when the container is removed or recreated.
 
   Bind mount a host directory:
-    docker run -d --name bitcoind -v /path/on/host:/home/bitcoin/.bitcoin romeujr/bitcoin-core:30.0
+    docker run -d --name bitcoind -v /path/on/host:/home/bitcoin/.bitcoin romeujr/bitcoin-core:32.1
   ...
 ```
 
@@ -329,7 +347,7 @@ For an onion service, use `-torcontrol=tor:9051 -torpassword=...` (or let Tor pu
 ```yaml
 services:
   bitcoind:
-    image: romeujr/bitcoin-core:30.0
+    image: romeujr/bitcoin-core:32.1
     container_name: bitcoind
     restart: unless-stopped
     stop_grace_period: 10m            # time for a clean shutdown
@@ -347,11 +365,11 @@ services:
       - -rpcallowip=172.16.0.0/12
       - -dbcache=2048
     healthcheck:
-      test: ["CMD", "bitcoin-cli", "-datadir=/home/bitcoin/.bitcoin", "getblockchaininfo"]
+      test: ["CMD", "/opt/healthcheck.sh"]
       interval: 1m
-      timeout: 15s
+      timeout: 20s
       start_period: 10m
-      retries: 3
+      retries: 5
     logging:
       driver: json-file
       options:
@@ -393,6 +411,58 @@ docker run --rm -v /srv/bitcoin:/home/bitcoin/.bitcoin romeujr/bitcoin-core \
 
 ---
 
+## Health checks
+
+The image includes `/opt/healthcheck.sh`, which reads the running `bitcoind`'s own options (network, data directory, RPC port and credentials), so it works unchanged on mainnet, testnet4, signet or regtest:
+
+| Command | Healthy (exit 0) when |
+|---|---|
+| `/opt/healthcheck.sh` or `/opt/healthcheck.sh liveness` | `bitcoind` runs and its RPC server answers, **including** while it is still loading at start-up. |
+| `/opt/healthcheck.sh readiness` | In addition, the initial block download is finished. |
+
+```bash
+docker exec bitcoind /opt/healthcheck.sh readiness
+# not ready: initial block download in progress (verificationprogress 0.4213...)
+```
+
+It is **not** enabled by default (you decide how your orchestrator reacts). Enable it with:
+
+```bash
+docker run ... --health-cmd /opt/healthcheck.sh --health-interval 1m --health-timeout 20s --health-start-period 10m ...
+```
+
+or with the `healthcheck:` block of the [Compose example](#docker-compose), or as Kubernetes probes (see the [Kubernetes guide](docs/kubernetes.md#5-probes-opthealthchecksh)). Keep timeouts generous: an unhealthy node that gets restarted pays a shutdown and a long start-up every time.
+
+---
+
+## Memory and performance
+
+**Memory limit.** `bitcoind` uses roughly `-dbcache` (default 450 MiB) + `-maxmempool` (default 300 MB) + a few hundred MiB for the rest. If a container memory limit (`--memory`, Compose `mem_limit`, Kubernetes `limits.memory`) is lower, the kernel kills it (OOM): that is a `SIGKILL`, with the same risk of corruption as `docker kill`. The entrypoint prints a warning at start-up when the limit looks too small:
+
+```text
+[entrypoint] WARNING: the container memory limit is 2048 MiB, but bitcoind may need about 4908 MiB (dbcache 4096 + maxmempool 300 + ~512 for the rest). ...
+```
+
+**Initial sync.** It is mostly limited by disk I/O and `-dbcache`. Use an SSD (on cloud block volumes, provision enough IOPS/throughput), give it a large `-dbcache` during the sync (e.g. 4096 or more), and lower it afterwards if memory is tight. On low-memory devices see [reduce-memory.md](https://github.com/bitcoin/bitcoin/blob/master/doc/reduce-memory.md).
+
+**UTXO snapshots (assumeutxo).** Bitcoin Core 28.0 and later can start from a UTXO snapshot (`bitcoin-cli loadtxoutset <file>`): the node becomes usable quickly while the full history is validated in the background. Only snapshots whose hash is built into the release are accepted. See [assumeutxo.md](https://github.com/bitcoin/bitcoin/blob/master/doc/assumeutxo.md).
+
+---
+
+## Kubernetes and cloud
+
+The image runs unchanged on Kubernetes and other orchestrators, but their defaults assume short-lived, stateless workloads. The [Kubernetes and cloud guide](docs/kubernetes.md) covers each point, and [`examples/kubernetes/bitcoind.yaml`](examples/kubernetes/bitcoind.yaml) is a complete StatefulSet. In short:
+
+- **Storage:** a PersistentVolumeClaim; `emptyDir` is refused by the image (it is deleted with the Pod).
+- **Shutdown:** `terminationGracePeriodSeconds: 600` (the default 30 seconds is too short); avoid spot/preemptible nodes.
+- **Security:** set `runAsUser`/`runAsGroup`/`fsGroup` (with `fsGroupChangePolicy: OnRootMismatch`); `B_UID`/`B_GID` are not needed there. Read-only root filesystem and `drop: ["ALL"]` work.
+- **Memory:** `limits.memory` above `dbcache + maxmempool + ~512 MiB`.
+- **Probes:** `/opt/healthcheck.sh liveness` (startup and liveness) and `readiness`, with `timeoutSeconds` raised.
+- **RPC:** internal Service + NetworkPolicy, credentials in a Secret (`-conf=`), never `-rpcpassword` in the Pod spec.
+- **ECS on Fargate** caps the stop timeout (120 seconds at the time of writing): keep `-dbcache` modest there.
+
+---
+
 ## Logs
 
 `bitcoind` writes its log to the console, so `docker logs -f bitcoind` shows everything. It also writes `debug.log` to the data directory unless `-nodebuglogfile` is set.
@@ -402,7 +472,7 @@ Configure log rotation for the container (see the Compose example, or `--log-opt
 The entrypoint prints a short summary before starting (RPC passwords are masked):
 
 ```text
-[entrypoint] Bitcoin Core 30.0 - https://github.com/romeujr/docker-bitcoin-core
+[entrypoint] Bitcoin Core 32.1 - https://github.com/romeujr/docker-bitcoin-core
 [entrypoint] User:           uid=1000 gid=1000
 [entrypoint] Data directory: /home/bitcoin/.bitcoin
 [entrypoint] Command:        bitcoind -datadir=/home/bitcoin/.bitcoin -server=1 -dbcache=2048
@@ -448,14 +518,28 @@ The image does not declare any port (no `EXPOSE`), so nothing is published unles
 |---|---|
 | `/opt/bitcoin` | Bitcoin Core (symlink to `/opt/bitcoin-<version>`), `bin/` is on the `PATH`. |
 | `/opt/entry-point.sh` | Entrypoint. |
+| `/opt/healthcheck.sh` | Health check (`liveness` / `readiness`). |
 | `/home/bitcoin/.bitcoin` | Default data directory (mount it). |
+
+### Labels
+
+Standard `org.opencontainers.image.*` labels (version, source, revision of this repository, documentation) and `io.github.romeujr.bitcoin-core.guix-sigs-ref`, the commit of [bitcoin-core/guix.sigs](https://github.com/bitcoin-core/guix.sigs) whose builder keys verified the release.
 
 ---
 
-## Security notes
+## Security
 
 - `bitcoind` runs as an unprivileged user; root is refused.
 - Release binaries are verified at build time against the Bitcoin Core builders' GPG signatures and SHA-256 checksums.
+- Published images are signed (keyless cosign, GitHub Actions OIDC) and carry an SBOM and SLSA provenance. Verify before deploying:
+
+  ```bash
+  cosign verify romeujr/bitcoin-core:32.1 \
+    --certificate-identity-regexp '^https://github.com/romeujr/docker-bitcoin-core/\.github/workflows/publish\.yml@' \
+    --certificate-oidc-issuer https://token.actions.githubusercontent.com
+  ```
+
+- Every CI build is scanned with Trivy, and supported versions are rebuilt monthly with Debian security updates.
 - RPC is not reachable from outside the container unless you explicitly bind it (`-rpcbind`) and allow clients (`-rpcallowip`). Keep RPC on loopback or on a private Docker network, and prefer `-rpcauth` or the cookie over plain `-rpcpassword`.
 - Bitcoin Core creates its files with restrictive permissions (umask `077`), so wallets and the cookie are only readable by `B_UID` (and root).
 - Back up your wallets (`bitcoin-cli backupwallet`, or copy the `wallets/` directory while the node is stopped). A volume is not a backup.
@@ -467,7 +551,7 @@ The image does not declare any port (no `EXPOSE`), so nothing is published unles
 Add tools on top of it:
 
 ```dockerfile
-FROM romeujr/bitcoin-core:30.0
+FROM romeujr/bitcoin-core:32.1
 RUN apt-get update \
  && apt-get install -y --no-install-recommends jq \
  && rm -rf /var/lib/apt/lists/*
@@ -476,7 +560,7 @@ RUN apt-get update \
 Bake a configuration into your own image:
 
 ```dockerfile
-FROM romeujr/bitcoin-core:30.0
+FROM romeujr/bitcoin-core:32.1
 COPY bitcoin.conf /etc/bitcoin/bitcoin.conf
 CMD ["-conf=/etc/bitcoin/bitcoin.conf"]
 ```
@@ -491,11 +575,11 @@ The [`Dockerfile`](https://github.com/romeujr/docker-bitcoin-core/blob/main/Dock
 
 ```bash
 # For the current platform
-docker buildx build --build-arg P_BITCOIN_VERSION=30.0 -t bitcoin-core:30.0 .
+docker buildx build --build-arg P_BITCOIN_VERSION=32.1 -t bitcoin-core:32.1 .
 
 # For another platform (on x86 hosts, enable QEMU first:
 #   docker run --rm --privileged multiarch/qemu-user-static --reset -p yes)
-docker buildx build --platform linux/arm64 --build-arg P_BITCOIN_VERSION=30.0 -t bitcoin-core:30.0-arm64 .
+docker buildx build --platform linux/arm64 --build-arg P_BITCOIN_VERSION=32.1 -t bitcoin-core:32.1-arm64 .
 ```
 
 | Build argument | Default | Description |
@@ -503,8 +587,19 @@ docker buildx build --platform linux/arm64 --build-arg P_BITCOIN_VERSION=30.0 -t
 | `P_BITCOIN_VERSION` | *(required)* | Bitcoin Core version, as in `https://bitcoincore.org/bin/bitcoin-core-<version>/`. |
 | `P_TARGETPLATFORM` | the target platform | `linux/amd64`, `linux/arm64`, `linux/arm/v7`, `linux/ppc64le` or `linux/riscv64`. |
 | `P_MIN_SIGNATURES` | `3` | Minimum number of valid builder signatures on `SHA256SUMS`. |
+| `P_GUIX_SIGS_REF` | `main` | Branch, tag or commit of `bitcoin-core/guix.sigs` providing the builder keys. Pin a commit for reproducible builds. |
+| `P_REVISION` | *(empty)* | Commit of this repository, stored in the `org.opencontainers.image.revision` label. |
 
-The build fails if the signatures or the checksum do not verify. The scripts used to publish the images are [`build-version.sh`](https://github.com/romeujr/docker-bitcoin-core/blob/main/build-version.sh) (one version, both architectures, manifest) and [`build-all.sh`](https://github.com/romeujr/docker-bitcoin-core/blob/main/build-all.sh) (all versions and `latest`).
+The build fails if the signatures or the checksum do not verify.
+
+Test your build with the same smoke tests as CI (data directory protections, UID/GID, clean shutdown, health checks, restricted mode...):
+
+```bash
+docker buildx build --load --build-arg P_BITCOIN_VERSION=32.1 -t bitcoin-core:test .
+bash tests/smoke.sh bitcoin-core:test
+```
+
+How the official images are built, tested, signed and published (GitHub Actions, [`versions.txt`](versions.txt), [`build-version.sh`](build-version.sh), [`build-all.sh`](build-all.sh)): see [docs/publishing.md](docs/publishing.md).
 
 ---
 
@@ -520,6 +615,7 @@ The build fails if the signatures or the checksum do not verify. The scripts use
 
 ## Image changelog
 
+- **2026-11 (cloud)** — images also on GHCR; signed with cosign, with SBOM and provenance; built, tested (amd64 and arm64) and scanned by GitHub Actions; supported versions rebuilt monthly; `/opt/healthcheck.sh` for liveness/readiness probes; warning when the memory limit is below `-dbcache` + `-maxmempool`; Kubernetes `emptyDir` refused; non-root / read-only root filesystem mode (Kubernetes restricted) supported and tested; Kubernetes and cloud guide; no `EXPOSE`; MIT license.
 - **2026-11** — `bitcoind` now runs as PID 1 and shuts down cleanly on `docker stop` (previously the entrypoint did not forward signals and the node was terminated without its shutdown sequence); release binaries are verified with the builders' GPG signatures and SHA-256 checksums; `B_UID`/`B_GID` no longer change file ownership recursively and accept group ids already in use; empty data directories created by Docker are handed to `B_UID:B_GID`; the data directory is also refused on anonymous volumes, in-memory filesystems (except `-regtest`) and read-only mounts; clear errors for unwritable data directories and for `-daemon`; `-help`/`-version` and the bundled tools work without a volume; Bitcoin Core binaries on the `PATH`; `-rpcpassword` masked in the start-up summary; GUI and test binaries removed.
 - **Earlier** — `B_UID`/`B_GID` support; refuse to start without a mounted data directory.
 
@@ -532,4 +628,6 @@ The build fails if the signatures or the checksum do not verify. The scripts use
 - Docker `run` reference: https://docs.docker.com/reference/cli/docker/container/run/
 - Issues and suggestions: https://github.com/romeujr/docker-bitcoin-core/issues
 
-Bitcoin Core is released under the [MIT license](https://github.com/bitcoin/bitcoin/blob/master/COPYING). This image is a community project and is not affiliated with the Bitcoin Core project.
+## License
+
+This repository is released under the [MIT license](LICENSE). Bitcoin Core is also released under the [MIT license](https://github.com/bitcoin/bitcoin/blob/master/COPYING); the Debian packages in the image keep their own licenses. This image is a community project and is not affiliated with the Bitcoin Core project.

@@ -50,21 +50,20 @@ services:
       # - -zmqpubrawtx=tcp://0.0.0.0:28333
 
     healthcheck:
-      # Uses the RPC cookie; add -testnet4 / -signet / -regtest if needed.
-      test: ["CMD", "bitcoin-cli", "-datadir=/home/bitcoin/.bitcoin", "getblockchaininfo"]
+      # Detects the network, data directory and credentials by itself.
+      # Use "/opt/healthcheck.sh readiness" to be healthy only once synced.
+      test: ["CMD", "/opt/healthcheck.sh", "liveness"]
       interval: 1m
-      timeout: 15s
+      timeout: 20s
       start_period: 10m
-      retries: 3
+      retries: 5
+
+    # Memory must fit dbcache + maxmempool + ~512 MiB, or the kernel kills
+    # bitcoind (OOM) without a clean shutdown.
+    # mem_limit: 4g
 
     logging:
       driver: json-file
       options:
         max-size: "50m"
         max-file: "5"
-
-    # Optional resource limits.
-    # deploy:
-    #   resources:
-    #     limits:
-    #       memory: 4g

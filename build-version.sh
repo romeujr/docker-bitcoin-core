@@ -1,45 +1,114 @@
 #!/bin/bash
+#
+# Builds and publishes one Bitcoin Core version as a multi-platform image,
+# with SBOM and provenance attestations, and optionally signs it with cosign.
+# Used both locally (WSL) and by GitHub Actions (.github/workflows/publish.yml).
+#
+# Usage: ./build-version.sh <version> [--latest]
+#
+#   --latest   also point the "latest" tag at this version
+#
+# Environment:
+#   IMAGES        Repositories to publish to, space separated.
+#                 Default: "docker.io/romeujr/bitcoin-core"
+#                 CI:      "docker.io/romeujr/bitcoin-core ghcr.io/romeujr/bitcoin-core"
+#   PLATFORMS     Default: "linux/amd64,linux/arm64"
+#   BUILDER       buildx builder to use. Created with the docker-container driver
+#                 if it does not exist. Default: "bitcoin-core-builder"
+#   BUILDER_OPTS  Extra "docker buildx create" options for a new builder.
+#   SIGN          "true" to sign with cosign (keyless in GitHub Actions).
+#
+# Requirements: docker buildx, git, QEMU for foreign platforms (see _setup.txt),
+# and "docker login" to every registry in IMAGES.
+#
+# Tags produced for each repository:
+#   <version>          multi-platform index (+ SBOM and provenance)
+#   <version>-<arch>   one per platform (e.g. 32.1-amd64, 32.1-arm64)
+#   latest             with --latest
 
-VERSION=$1
+set -euo pipefail
+cd "$(dirname "$0")"
 
-set +e
+VERSION="${1:?usage: $0 <version> [--latest]}"
+LATEST=false
+[ "${2:-}" = "--latest" ] && LATEST=true
 
-echo ""
-echo "Clean old images for version $VERSION."
-docker image rm romeujr/bitcoin-core:$VERSION-amd64
-docker image rm romeujr/bitcoin-core:$VERSION-arm64
-echo "y" | docker builder prune
+IMAGES="${IMAGES:-docker.io/romeujr/bitcoin-core}"
+PLATFORMS="${PLATFORMS:-linux/amd64,linux/arm64}"
+BUILDER="${BUILDER:-bitcoin-core-builder}"
+SIGN="${SIGN:-false}"
 
-set -e
+step() { echo ""; echo "==> $*"; }
 
-echo ""
-echo "Build version $VERSION for amd64..."
-docker buildx build --platform linux/amd64 --build-arg P_TARGETPLATFORM="linux/amd64" --build-arg P_BITCOIN_VERSION="$VERSION" -t romeujr/bitcoin-core:$VERSION-amd64 -f Dockerfile .
+index_digest() {
+  docker buildx --builder "${BUILDER}" imagetools inspect "$1" | awk '/^Digest:/ { print $2; exit }'
+}
 
-echo ""
-echo "Build version $VERSION for arm64..."
-docker buildx build --platform linux/arm64 --build-arg P_TARGETPLATFORM="linux/arm64" --build-arg P_BITCOIN_VERSION="$VERSION" -t romeujr/bitcoin-core:$VERSION-arm64 -f Dockerfile .
+platform_digest() {
+  docker buildx --builder "${BUILDER}" imagetools inspect "$1" --format \
+    "{{range .Manifest.Manifests}}{{if and (eq .Platform.OS \"linux\") (eq .Platform.Architecture \"$2\")}}{{.Digest}}{{end}}{{end}}"
+}
 
-echo ""
-echo "Push version $VERSION for arm64..."
-docker push romeujr/bitcoin-core:$VERSION-arm64
+if ! docker buildx inspect "${BUILDER}" > /dev/null 2>&1; then
+  step "Creating buildx builder ${BUILDER}"
+  # shellcheck disable=SC2086 # BUILDER_OPTS is a list of options
+  docker buildx create --name "${BUILDER}" --driver docker-container ${BUILDER_OPTS:-} > /dev/null
+fi
 
-echo ""
-echo "Push version $VERSION for amd64..."
-docker push romeujr/bitcoin-core:$VERSION-amd64
+GUIX_SIGS_REF="$(git ls-remote https://github.com/bitcoin-core/guix.sigs refs/heads/main | cut -f1 || true)"
+GUIX_SIGS_REF="${GUIX_SIGS_REF:-main}"
+REVISION="$(git rev-parse HEAD 2> /dev/null || true)"
 
-set +e
+tags=()
+for image in ${IMAGES}; do
+  tags+=(--tag "${image}:${VERSION}")
+done
 
-echo ""
-echo "Clean manifest for version $VERSION."
-docker manifest rm romeujr/bitcoin-core:$VERSION
+step "Building Bitcoin Core ${VERSION} for ${PLATFORMS} (guix.sigs ${GUIX_SIGS_REF})"
+docker buildx build \
+  --builder "${BUILDER}" \
+  --platform "${PLATFORMS}" \
+  --build-arg P_BITCOIN_VERSION="${VERSION}" \
+  --build-arg P_GUIX_SIGS_REF="${GUIX_SIGS_REF}" \
+  --build-arg P_REVISION="${REVISION}" \
+  --sbom=true \
+  --provenance=mode=max \
+  --pull \
+  --push \
+  "${tags[@]}" \
+  .
 
-set -e
+published=()
+for image in ${IMAGES}; do
+  step "Tagging ${image}"
+  published+=("${image}:${VERSION}")
 
-echo ""
-echo "Create manifest for version $VERSION."
-docker manifest create romeujr/bitcoin-core:$VERSION romeujr/bitcoin-core:$VERSION-amd64 romeujr/bitcoin-core:$VERSION-arm64
+  for platform in ${PLATFORMS//,/ }; do
+    arch="${platform#*/}"
+    arch="${arch%%/*}"
+    digest="$(platform_digest "${image}:${VERSION}" "${arch}")"
+    if [ -z "${digest}" ]; then
+      echo "ERROR: no ${platform} image found in ${image}:${VERSION}." >&2
+      exit 1
+    fi
+    docker buildx --builder "${BUILDER}" imagetools create --tag "${image}:${VERSION}-${arch}" "${image}@${digest}"
+    published+=("${image}:${VERSION}-${arch}")
+  done
 
-echo ""
-echo "Push manifest for version $VERSION."
-docker manifest push romeujr/bitcoin-core:$VERSION
+  if ${LATEST}; then
+    docker buildx --builder "${BUILDER}" imagetools create --tag "${image}:latest" "${image}:${VERSION}"
+    published+=("${image}:latest")
+  fi
+done
+
+if [ "${SIGN}" = "true" ]; then
+  step "Signing with cosign"
+  for ref in "${published[@]}"; do
+    cosign sign --yes --recursive "${ref%:*}@$(index_digest "${ref}")"
+  done
+fi
+
+step "Published"
+for ref in "${published[@]}"; do
+  echo "  ${ref}  $(index_digest "${ref}")"
+done

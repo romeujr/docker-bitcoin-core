@@ -1,0 +1,33 @@
+# Keeps the Docker Hub overview in sync with DOCKERHUB.md.
+name: Docker Hub description
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - DOCKERHUB.md
+      - .github/workflows/dockerhub-description.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  update:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check the 25,000 character limit
+        run: |
+          size="$(wc -m < DOCKERHUB.md)"
+          echo "DOCKERHUB.md: ${size} characters"
+          [ "${size}" -le 25000 ] || { echo "::error::DOCKERHUB.md exceeds the Docker Hub limit of 25,000 characters"; exit 1; }
+
+      - uses: peter-evans/dockerhub-description@v4
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+          repository: romeujr/bitcoin-core
+          readme-filepath: ./DOCKERHUB.md
+          short-description: "Bitcoin Core for amd64/arm64: verified binaries, every release, safe shutdown, custom UID/GID"
