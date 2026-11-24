@@ -1,0 +1,70 @@
+# Bitcoin Core node with romeujr/bitcoin-core.
+# https://github.com/romeujr/docker-bitcoin-core
+#
+# Usage:
+#   mkdir -p data && cp bitcoin.conf data/     # optional configuration file
+#   docker compose up -d
+#   docker compose logs -f bitcoind
+#   docker compose exec -u bitcoin bitcoind bitcoin-cli -getinfo
+#   docker compose stop                        # clean shutdown (see stop_grace_period)
+
+services:
+  bitcoind:
+    # Pin a version; upgrade deliberately after reading the release notes.
+    image: romeujr/bitcoin-core:latest
+    container_name: bitcoind
+    restart: unless-stopped
+
+    # bitcoind needs time to flush its caches on shutdown. Docker's default
+    # (10s) is far too short and may corrupt the chainstate.
+    stop_grace_period: 10m
+
+    # Reaps processes started by -blocknotify / -walletnotify scripts.
+    init: true
+
+    environment:
+      # Run as the owner of ./data on the host (`id -u` / `id -g`).
+      B_UID: "1000"
+      B_GID: "1000"
+
+    volumes:
+      # Mandatory: bitcoind refuses to start without a mounted data directory.
+      - ./data:/home/bitcoin/.bitcoin
+
+    ports:
+      - "8333:8333"                    # P2P (mainnet)
+      - "127.0.0.1:8332:8332"          # RPC, reachable from the host only
+      # - "127.0.0.1:28332:28332"      # ZMQ blocks
+      # - "127.0.0.1:28333:28333"      # ZMQ transactions
+
+    # Any bitcoind option; they can also live in ./data/bitcoin.conf.
+    command:
+      - -server=1
+      - -rpcbind=0.0.0.0
+      - -rpcallowip=172.16.0.0/12      # Docker networks
+      - -rpcallowip=192.168.0.0/16
+      - -dbcache=2048
+      # - -prune=10000
+      # - -txindex=1
+      # - -zmqpubrawblock=tcp://0.0.0.0:28332
+      # - -zmqpubrawtx=tcp://0.0.0.0:28333
+
+    healthcheck:
+      # Uses the RPC cookie; add -testnet4 / -signet / -regtest if needed.
+      test: ["CMD", "bitcoin-cli", "-datadir=/home/bitcoin/.bitcoin", "getblockchaininfo"]
+      interval: 1m
+      timeout: 15s
+      start_period: 10m
+      retries: 3
+
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "5"
+
+    # Optional resource limits.
+    # deploy:
+    #   resources:
+    #     limits:
+    #       memory: 4g

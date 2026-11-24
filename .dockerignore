@@ -1,0 +1,2 @@
+# The Dockerfile is self-contained and needs no build context.
+*
