@@ -40,7 +40,7 @@ jobs:
       versions: ${{ steps.plan.outputs.versions }}
       latest: ${{ steps.plan.outputs.latest }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 2
 
@@ -84,7 +84,7 @@ jobs:
       matrix:
         version: ${{ fromJSON(needs.plan.outputs.versions) }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Smoke test (amd64) before publishing
         env:
