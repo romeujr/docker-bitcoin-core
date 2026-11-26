@@ -42,16 +42,22 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with:
-          fetch-depth: 2
+          fetch-depth: 0
 
       - id: plan
         env:
           EVENT: ${{ github.event_name }}
           INPUT: ${{ github.event.inputs.versions }}
+          BEFORE: ${{ github.event.before }}
         run: |
+          # A push can carry several commits: compare with the commit main
+          # pointed to before the push, not just with HEAD^.
+          if [ "${EVENT}" = "push" ] && ! git cat-file -e "${BEFORE}^{commit}" 2> /dev/null; then
+            BEFORE="HEAD^"
+          fi
           case "${EVENT}" in
             schedule) list="$(bash versions.sh supported)" ;;
-            push)     list="$(git diff HEAD^ HEAD -- versions.txt | sed -nE 's/^\+[[:space:]]*([0-9][0-9.]*)[[:space:]]*$/\1/p')" ;;
+            push)     list="$(git diff "${BEFORE}" HEAD -- versions.txt | sed -nE 's/^\+[[:space:]]*([0-9][0-9.]*)[[:space:]]*$/\1/p')" ;;
             *)        case "${INPUT}" in
                         supported|latest|all) list="$(bash versions.sh "${INPUT}")" ;;
                         *) list="${INPUT}" ;;

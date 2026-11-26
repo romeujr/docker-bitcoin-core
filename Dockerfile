@@ -553,12 +553,14 @@ case "${mode}" in
   *) echo "usage: $0 [liveness|readiness]" >&2; exit 2 ;;
 esac
 
+# bitcoind, or bitcoin-node when started with "bitcoin -m node" (multiprocess).
 pid=""
 for proc in /proc/[0-9]*; do
-  if [ "$(cat "${proc}/comm" 2>/dev/null)" = "bitcoind" ]; then
-    pid="${proc#/proc/}"
-    break
-  fi
+  case "$(cat "${proc}/comm" 2>/dev/null)" in
+    bitcoind|bitcoin-node)
+      pid="${proc#/proc/}"
+      break ;;
+  esac
 done
 if [ -z "${pid}" ]; then
   echo "unhealthy: bitcoind is not running"
