@@ -6,7 +6,7 @@ How the images of [`romeujr/bitcoin-core`](https://hub.docker.com/r/romeujr/bitc
 
 | Piece | Role |
 |---|---|
-| [`Dockerfile`](../Dockerfile) | Self-contained image definition: one `RUN`, verified Bitcoin Core binaries, entrypoint and health check embedded. |
+| [`Dockerfile`](../Dockerfile) | Self-contained image definition: one `RUN`, verified Bitcoin Core binaries, entrypoint and health check embedded. Explained part by part in [dockerfile.md](dockerfile.md). |
 | [`versions.txt`](../versions.txt) | Every published Bitcoin Core version, one per line. **Single source of truth.** |
 | [`versions.sh`](../versions.sh) | Lists `all`, `latest`, `oldest` or `supported` versions (newest release of the 3 newest majors). |
 | [`build-version.sh`](../build-version.sh) | Builds one version for `linux/amd64` + `linux/arm64`, pushes it with SBOM and provenance attestations, creates the `<version>-<arch>` tags (and `latest`), optionally signs with cosign. Used both locally and by CI. |
