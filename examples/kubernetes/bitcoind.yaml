@@ -1,0 +1,152 @@
+# Bitcoin Core on Kubernetes with romeujr/bitcoin-core.
+# Guide: https://github.com/romeujr/docker-bitcoin-core/blob/main/docs/kubernetes.md
+#
+#   kubectl create namespace bitcoin
+#   kubectl -n bitcoin apply -f bitcoind.yaml
+#   kubectl -n bitcoin logs -f bitcoind-0
+#   kubectl -n bitcoin exec bitcoind-0 -- bitcoin-cli -datadir=/home/bitcoin/.bitcoin -getinfo
+#
+# Compatible with the "restricted" Pod Security Standard.
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: bitcoind-config
+type: Opaque
+stringData:
+  # Kept in a Secret because it may hold RPC credentials. Generate rpcauth with
+  # https://github.com/bitcoin/bitcoin/tree/master/share/rpcauth
+  bitcoin.conf: |
+    server=1
+    dbcache=2048
+    # rpcauth=alice:<salt>$<hash>
+    [main]
+    rpcbind=0.0.0.0
+    # Pod network of your cluster (adjust).
+    rpcallowip=10.0.0.0/8
+    rpcallowip=172.16.0.0/12
+    rpcallowip=192.168.0.0/16
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: bitcoind
+  labels:
+    app.kubernetes.io/name: bitcoind
+spec:
+  serviceName: bitcoind
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: bitcoind
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: bitcoind
+    spec:
+      # bitcoind flushes its caches on SIGTERM; the default (30s) is too short.
+      terminationGracePeriodSeconds: 600
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        # Avoid a recursive chown of hundreds of GB at every start.
+        fsGroupChangePolicy: OnRootMismatch
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: bitcoind
+          image: romeujr/bitcoin-core:latest   # pin a version, e.g. romeujr/bitcoin-core:32.1
+          args:
+            - -conf=/etc/bitcoin/bitcoin.conf
+          ports:
+            - name: p2p
+              containerPort: 8333
+            - name: rpc
+              containerPort: 8332
+          resources:
+            # Memory must fit dbcache + maxmempool + ~512 MiB, or the kernel
+            # kills bitcoind (OOM) without a clean shutdown.
+            requests:
+              cpu: "1"
+              memory: 3Gi
+            limits:
+              memory: 4Gi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          startupProbe:
+            exec:
+              command: ["/opt/healthcheck.sh", "liveness"]
+            periodSeconds: 10
+            timeoutSeconds: 20
+            failureThreshold: 360   # up to 1 hour to open the RPC server
+          livenessProbe:
+            exec:
+              command: ["/opt/healthcheck.sh", "liveness"]
+            periodSeconds: 60
+            timeoutSeconds: 20
+            failureThreshold: 5
+          readinessProbe:
+            exec:
+              command: ["/opt/healthcheck.sh", "readiness"]
+            periodSeconds: 60
+            timeoutSeconds: 20
+          volumeMounts:
+            - name: data
+              mountPath: /home/bitcoin/.bitcoin
+            - name: config
+              mountPath: /etc/bitcoin
+              readOnly: true
+      volumes:
+        - name: config
+          secret:
+            secretName: bitcoind-config
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        # storageClassName: <a fast SSD class>
+        resources:
+          requests:
+            storage: 1Ti   # full mainnet node with indexes; use -prune for less
+---
+# RPC, reachable only inside the cluster.
+apiVersion: v1
+kind: Service
+metadata:
+  name: bitcoind
+spec:
+  selector:
+    app.kubernetes.io/name: bitcoind
+  ports:
+    - name: rpc
+      port: 8332
+      targetPort: rpc
+    - name: p2p
+      port: 8333
+      targetPort: p2p
+---
+# Only Pods labelled "bitcoin-rpc-client: true" may reach RPC; P2P is open.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: bitcoind
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: bitcoind
+  policyTypes: ["Ingress"]
+  ingress:
+    - ports:
+        - port: 8333
+    - from:
+        - podSelector:
+            matchLabels:
+              bitcoin-rpc-client: "true"
+      ports:
+        - port: 8332

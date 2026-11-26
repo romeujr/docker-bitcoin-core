@@ -1,0 +1,66 @@
+# Builds the newest version on amd64 and arm64 (native runners, no QEMU),
+# runs the smoke tests and a vulnerability scan. Nothing is published.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Lint GitHub workflows
+        run: docker run --rm -v "$PWD:/repo" -w /repo rhysd/actionlint:latest -color
+
+      - name: ShellCheck scripts
+        run: docker run --rm -v "$PWD:/mnt" koalaman/shellcheck:stable build-version.sh build-all.sh versions.sh tests/smoke.sh
+
+  test:
+    name: test (${{ matrix.arch }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-24.04
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build
+        run: |
+          version="$(bash versions.sh latest)"
+          echo "Bitcoin Core ${version}"
+          docker buildx build --load \
+            --build-arg P_BITCOIN_VERSION="${version}" \
+            --build-arg P_REVISION="${GITHUB_SHA}" \
+            -t bitcoin-core:test .
+
+      - name: ShellCheck embedded scripts
+        run: |
+          mkdir -p "${RUNNER_TEMP}/embedded"
+          docker run --rm --entrypoint cat bitcoin-core:test /opt/entry-point.sh > "${RUNNER_TEMP}/embedded/entry-point.sh"
+          docker run --rm --entrypoint cat bitcoin-core:test /opt/healthcheck.sh > "${RUNNER_TEMP}/embedded/healthcheck.sh"
+          docker run --rm -v "${RUNNER_TEMP}/embedded:/mnt" koalaman/shellcheck:stable entry-point.sh healthcheck.sh
+
+      - name: Smoke tests
+        run: bash tests/smoke.sh bitcoin-core:test
+
+      - name: Vulnerability scan (critical, with a fix available)
+        run: |
+          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock aquasec/trivy:latest \
+            image --scanners vuln --severity CRITICAL --ignore-unfixed --exit-code 1 bitcoin-core:test

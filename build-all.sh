@@ -1,27 +1,26 @@
 #!/bin/bash
+#
+# Publishes the versions listed in versions.txt with ./build-version.sh and
+# points "latest" at the newest one.
+#
+# Usage: ./build-all.sh [all|supported]
+#
+#   all        every version (default)
+#   supported  only the newest release of the 3 newest major versions
+#              (what the monthly rebuild in GitHub Actions publishes)
+#
+# The environment variables of build-version.sh (IMAGES, PLATFORMS, ...) apply.
 
-set -e
+set -euo pipefail
+cd "$(dirname "$0")"
 
-VERSIONS=("22.0" "22.1" "23.0" "23.1" "23.2" "24.0" "24.0.1" "24.1" "24.2" "25.0" "25.1" "25.2" "26.0" "26.1" "26.2" "27.0" "27.1" "27.2" "28.0" "28.1" "28.2" "28.3" "28.4" "29.0" "29.1" "29.2" "29.3" "29.4" "29.5" "30.2" "30.3" "30.4" "31.0" "31.1" "31.2" "32.1")
+mode="${1:-all}"
+latest="$(bash ./versions.sh latest)"
 
-for STRING in "${VERSIONS[@]}"; do
-    unset VERSION
-    export VERSION="$STRING"
-    ./build-version.sh $VERSION
+for version in $(bash ./versions.sh "${mode}"); do
+  if [ "${version}" = "${latest}" ]; then
+    bash ./build-version.sh "${version}" --latest
+  else
+    bash ./build-version.sh "${version}"
+  fi
 done
-
-set +e
-
-echo ""
-echo "Clean manifest for latest version."
-docker manifest rm romeujr/bitcoin-core:latest
-
-set -e
-
-echo ""
-echo "Create manifest for latest version."
-docker manifest create romeujr/bitcoin-core:latest romeujr/bitcoin-core:$VERSION-amd64 romeujr/bitcoin-core:$VERSION-arm64
-
-echo ""
-echo "Push manifest for latest version."
-docker manifest push romeujr/bitcoin-core:latest

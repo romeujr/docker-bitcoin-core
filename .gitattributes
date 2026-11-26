@@ -1,0 +1,3 @@
+# Scripts and the Dockerfile embed shell code: always use LF line endings.
+* text=auto eol=lf
+*.png binary
