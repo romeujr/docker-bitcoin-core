@@ -17,6 +17,10 @@
 #                 if it does not exist. Default: "bitcoin-core-builder"
 #   BUILDER_OPTS  Extra "docker buildx create" options for a new builder.
 #   SIGN          "true" to sign with cosign (keyless in GitHub Actions).
+#   RETRIES       Attempts of each registry operation when the registry answers
+#                 "429 Too Many Requests", waiting 1, 2, 4, 8... minutes in
+#                 between. Default: 7 (1+2+4+8+16+32 = 63 minutes of waiting at
+#                 most: more than Docker Hub's hourly window).
 #
 # Requirements: docker buildx, git, QEMU for foreign platforms (see _setup.txt),
 # and "docker login" to every registry in IMAGES.
@@ -25,6 +29,12 @@
 #   <version>          multi-platform index (+ SBOM and provenance)
 #   <version>-<arch>   one per platform (e.g. 32.1-amd64, 32.1-arm64)
 #   latest             with --latest
+#
+# Docker Hub limits how many manifests an account may read per hour. To stay
+# well below it, digests are never read back from Docker Hub: the index digest
+# comes from the build's metadata file, the platform digests are read once from
+# another registry when there is one (GHCR in CI), and the digests of the
+# "<version>-<arch>" tags from the output of the command that creates them.
 
 set -euo pipefail
 cd "$(dirname "$0")"
@@ -37,14 +47,39 @@ IMAGES="${IMAGES:-docker.io/romeujr/bitcoin-core}"
 PLATFORMS="${PLATFORMS:-linux/amd64,linux/arm64}"
 BUILDER="${BUILDER:-bitcoin-core-builder}"
 SIGN="${SIGN:-false}"
+RETRIES="${RETRIES:-7}"
+
+TMP="$(mktemp -d)"
+trap 'rm -rf "${TMP}"' EXIT
+LOG="${TMP}/registry.log"
 
 step() { echo ""; echo "==> $*"; }
 
-index_digest() {
-  # No pipe: with "| awk '... exit'" the reader quit early, buildx got SIGPIPE,
-  # docker exited 255 without a message and pipefail aborted the script.
-  # "{{with}}" is needed: a format starting with "{{.Manifest" prints the
-  # default text output instead.
+# Runs a command that talks to registries. When it fails because a registry
+# rate limits us (HTTP 429), waits and runs it again. Its output is shown and
+# also kept in ${LOG} for the caller.
+with_retry() {
+  local attempt=1 delay=60
+  while true; do
+    if "$@" 2>&1 | tee "${LOG}"; then
+      return 0
+    fi
+    if [ "${attempt}" -ge "${RETRIES}" ] || ! grep -qiE 'too ?many ?requests' "${LOG}"; then
+      return 1
+    fi
+    echo ""
+    echo "==> Rate limited by the registry: retrying in $((delay / 60)) min (attempt $((attempt + 1)) of ${RETRIES})"
+    sleep "${delay}"
+    attempt=$((attempt + 1))
+    delay=$((delay * 2))
+  done
+}
+
+# Digest of the image (index or manifest) a reference points to. Not piped into
+# "awk ... exit": the reader quitting early killed buildx with SIGPIPE, and
+# docker then exited 255 without a message. "{{with}}" is needed: a format
+# starting with "{{.Manifest" prints the default text output instead.
+read_digest() {
   local digest
   digest="$(docker buildx --builder "${BUILDER}" imagetools inspect "$1" --format '{{with .Manifest}}{{.Digest}}{{end}}')"
   if [ -z "${digest}" ]; then
@@ -69,13 +104,22 @@ GUIX_SIGS_REF="$(git ls-remote https://github.com/bitcoin-core/guix.sigs refs/he
 GUIX_SIGS_REF="${GUIX_SIGS_REF:-main}"
 REVISION="$(git rev-parse HEAD 2> /dev/null || true)"
 
+# Registry to read digests from: the first one that is not Docker Hub, if any.
+READ_IMAGE=""
+FIRST_IMAGE=""
 tags=()
 for image in ${IMAGES}; do
   tags+=(--tag "${image}:${VERSION}")
+  FIRST_IMAGE="${FIRST_IMAGE:-${image}}"
+  case "${image}" in
+    docker.io/*|index.docker.io/*|registry-1.docker.io/*) ;;
+    *) READ_IMAGE="${READ_IMAGE:-${image}}" ;;
+  esac
 done
+READ_IMAGE="${READ_IMAGE:-${FIRST_IMAGE}}"
 
 step "Building Bitcoin Core ${VERSION} for ${PLATFORMS} (guix.sigs ${GUIX_SIGS_REF})"
-docker buildx build \
+with_retry docker buildx build \
   --builder "${BUILDER}" \
   --platform "${PLATFORMS}" \
   --build-arg P_BITCOIN_VERSION="${VERSION}" \
@@ -83,47 +127,71 @@ docker buildx build \
   --build-arg P_REVISION="${REVISION}" \
   --sbom=true \
   --provenance=mode=max \
+  --metadata-file "${TMP}/metadata.json" \
   --pull \
   --push \
   "${tags[@]}" \
   .
 
+# The same index is pushed to every registry, so it has the same digest everywhere.
+INDEX_DIGEST="$(grep -oE '"containerimage.digest": *"sha256:[0-9a-f]{64}"' "${TMP}/metadata.json" | grep -oE 'sha256:[0-9a-f]{64}' || true)"
+if [ -z "${INDEX_DIGEST}" ]; then
+  echo "ERROR: no image digest in the build metadata." >&2
+  exit 1
+fi
+
+arches=()
+declare -A arch_digest=()
+for platform in ${PLATFORMS//,/ }; do
+  arch="${platform#*/}"
+  arch="${arch%%/*}"
+  arches+=("${arch}")
+  arch_digest["${arch}"]="$(platform_digest "${READ_IMAGE}@${INDEX_DIGEST}" "${arch}")"
+  if [ -z "${arch_digest[${arch}]}" ]; then
+    echo "ERROR: no ${platform} image found in ${READ_IMAGE}@${INDEX_DIGEST}." >&2
+    exit 1
+  fi
+done
+
+# "<reference> <digest>" of everything published, and the digests to sign
+# ("latest" shares the digest of "<version>" and is signed with it).
 published=()
+to_sign=()
 for image in ${IMAGES}; do
   step "Tagging ${image}"
-  published+=("${image}:${VERSION}")
+  published+=("${image}:${VERSION} ${INDEX_DIGEST}")
+  to_sign+=("${image}@${INDEX_DIGEST}")
 
-  for platform in ${PLATFORMS//,/ }; do
-    arch="${platform#*/}"
-    arch="${arch%%/*}"
-    digest="$(platform_digest "${image}:${VERSION}" "${arch}")"
+  for arch in "${arches[@]}"; do
+    tag="${image}:${VERSION}-${arch}"
+    with_retry docker buildx --builder "${BUILDER}" imagetools create --progress plain \
+      --tag "${tag}" "${image}@${arch_digest[${arch}]}"
+    # The new tag is an index around the platform image and its attestations;
+    # its digest differs from one registry to another, so take it from the
+    # output ("pushing sha256:... to <tag>") instead of reading it back.
+    digest="$(sed -nE 's/.*pushing (sha256:[0-9a-f]{64}) to .*/\1/p' "${LOG}" | tail -n 1)"
     if [ -z "${digest}" ]; then
-      echo "ERROR: no ${platform} image found in ${image}:${VERSION}." >&2
-      exit 1
+      digest="$(read_digest "${tag}")"
     fi
-    docker buildx --builder "${BUILDER}" imagetools create --tag "${image}:${VERSION}-${arch}" "${image}@${digest}"
-    published+=("${image}:${VERSION}-${arch}")
+    published+=("${tag} ${digest}")
+    to_sign+=("${image}@${digest}")
   done
 
   if ${LATEST}; then
-    docker buildx --builder "${BUILDER}" imagetools create --tag "${image}:latest" "${image}:${VERSION}"
-    published+=("${image}:latest")
+    with_retry docker buildx --builder "${BUILDER}" imagetools create --progress plain \
+      --tag "${image}:latest" "${image}@${INDEX_DIGEST}"
+    published+=("${image}:latest ${INDEX_DIGEST}")
   fi
 done
 
 if [ "${SIGN}" = "true" ]; then
   step "Signing with cosign"
-  # Tags sharing a digest ("latest" and "<version>") are signed once.
-  declare -A signed=()
-  for ref in "${published[@]}"; do
-    target="${ref%:*}@$(index_digest "${ref}")"
-    [ -n "${signed[${target}]:-}" ] && continue
-    signed["${target}"]=1
-    cosign sign --yes --recursive "${target}"
+  for target in "${to_sign[@]}"; do
+    with_retry cosign sign --yes --recursive "${target}"
   done
 fi
 
 step "Published"
-for ref in "${published[@]}"; do
-  echo "  ${ref}  $(index_digest "${ref}")"
+for entry in "${published[@]}"; do
+  echo "  ${entry% *}  ${entry##* }"
 done
