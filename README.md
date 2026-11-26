@@ -539,6 +539,7 @@ Standard `org.opencontainers.image.*` labels (version, source, revision of this 
     --certificate-oidc-issuer https://token.actions.githubusercontent.com
   ```
 
+- Every line of the `Dockerfile` is explained, and every claim above can be checked independently (provenance, keys used, binaries compared byte for byte with the official release): see [The Dockerfile, explained](docs/dockerfile.md).
 - Every CI build is scanned with Trivy, and supported versions are rebuilt monthly with Debian security updates.
 - RPC is not reachable from outside the container unless you explicitly bind it (`-rpcbind`) and allow clients (`-rpcallowip`). Keep RPC on loopback or on a private Docker network, and prefer `-rpcauth` or the cookie over plain `-rpcpassword`.
 - Bitcoin Core creates its files with restrictive permissions (umask `077`), so wallets and the cookie are only readable by `B_UID` (and root).
@@ -590,7 +591,7 @@ docker buildx build --platform linux/arm64 --build-arg P_BITCOIN_VERSION=32.1 -t
 | `P_GUIX_SIGS_REF` | `main` | Branch, tag or commit of `bitcoin-core/guix.sigs` providing the builder keys. Pin a commit for reproducible builds. |
 | `P_REVISION` | *(empty)* | Commit of this repository, stored in the `org.opencontainers.image.revision` label. |
 
-The build fails if the signatures or the checksum do not verify.
+The build fails if the signatures or the checksum do not verify. What each part of the `Dockerfile` does, and why: [docs/dockerfile.md](docs/dockerfile.md).
 
 Test your build with the same smoke tests as CI (data directory protections, UID/GID, clean shutdown, health checks, restricted mode...):
 
