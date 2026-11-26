@@ -103,8 +103,13 @@ done
 
 if [ "${SIGN}" = "true" ]; then
   step "Signing with cosign"
+  # Tags sharing a digest ("latest" and "<version>") are signed once.
+  declare -A signed=()
   for ref in "${published[@]}"; do
-    cosign sign --yes --recursive "${ref%:*}@$(index_digest "${ref}")"
+    target="${ref%:*}@$(index_digest "${ref}")"
+    [ -n "${signed[${target}]:-}" ] && continue
+    signed["${target}"]=1
+    cosign sign --yes --recursive "${target}"
   done
 fi
 

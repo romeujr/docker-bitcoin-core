@@ -1,5 +1,7 @@
-# Builds the newest version on amd64 and arm64 (native runners, no QEMU),
-# runs the smoke tests and a vulnerability scan. Nothing is published.
+# Builds the newest version on amd64 and arm64 (native runners, no QEMU) and
+# the oldest version on amd64, runs the smoke tests and a vulnerability scan.
+# Nothing is published. The oldest version catches changes that break older
+# Bitcoin Core releases before the monthly or "all" publish does.
 name: CI
 
 on:
@@ -28,22 +30,29 @@ jobs:
         run: docker run --rm -v "$PWD:/mnt" koalaman/shellcheck:stable build-version.sh build-all.sh versions.sh tests/smoke.sh
 
   test:
-    name: test (${{ matrix.arch }})
+    name: test (${{ matrix.label }})
     strategy:
       fail-fast: false
       matrix:
         include:
-          - arch: amd64
+          - label: amd64
             runner: ubuntu-24.04
-          - arch: arm64
+            which: latest
+          - label: arm64
             runner: ubuntu-24.04-arm
+            which: latest
+          - label: amd64, oldest version
+            runner: ubuntu-24.04
+            which: oldest
     runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v7
 
       - name: Build
+        env:
+          WHICH: ${{ matrix.which }}
         run: |
-          version="$(bash versions.sh latest)"
+          version="$(bash versions.sh "${WHICH}")"
           echo "Bitcoin Core ${version}"
           docker buildx build --load \
             --build-arg P_BITCOIN_VERSION="${version}" \

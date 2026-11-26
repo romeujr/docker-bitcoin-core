@@ -8,11 +8,11 @@ How the images of [`romeujr/bitcoin-core`](https://hub.docker.com/r/romeujr/bitc
 |---|---|
 | [`Dockerfile`](../Dockerfile) | Self-contained image definition: one `RUN`, verified Bitcoin Core binaries, entrypoint and health check embedded. |
 | [`versions.txt`](../versions.txt) | Every published Bitcoin Core version, one per line. **Single source of truth.** |
-| [`versions.sh`](../versions.sh) | Lists `all`, `latest` or `supported` versions (newest release of the 3 newest majors). |
+| [`versions.sh`](../versions.sh) | Lists `all`, `latest`, `oldest` or `supported` versions (newest release of the 3 newest majors). |
 | [`build-version.sh`](../build-version.sh) | Builds one version for `linux/amd64` + `linux/arm64`, pushes it with SBOM and provenance attestations, creates the `<version>-<arch>` tags (and `latest`), optionally signs with cosign. Used both locally and by CI. |
 | [`build-all.sh`](../build-all.sh) | Runs `build-version.sh` for `all` or `supported` versions. |
 | [`tests/smoke.sh`](../tests/smoke.sh) | Behaviour tests of a built image (data directory protections, UID/GID, clean shutdown, health checks, restricted mode...). |
-| [`.github/workflows/ci.yml`](../.github/workflows/ci.yml) | On every PR and push to `main`: lint, build the newest version on amd64 **and** arm64 (native runners), smoke tests, ShellCheck of the embedded scripts, vulnerability scan (Trivy, fixable critical issues). Publishes nothing. |
+| [`.github/workflows/ci.yml`](../.github/workflows/ci.yml) | On every PR and push to `main`: lint, build the newest version on amd64 **and** arm64 (native runners) and the oldest version on amd64, smoke tests, ShellCheck of the embedded scripts, vulnerability scan (Trivy, fixable critical issues). Publishes nothing. |
 | [`.github/workflows/publish.yml`](../.github/workflows/publish.yml) | Publishes to Docker Hub and GHCR, signed. Triggers below. |
 | [`.github/workflows/dockerhub-description.yml`](../.github/workflows/dockerhub-description.yml) | Copies [`DOCKERHUB.md`](../DOCKERHUB.md) to the Docker Hub overview when it changes on `main`. |
 | [`.github/dependabot.yml`](../.github/dependabot.yml) | Weekly updates of the GitHub Actions used. |
@@ -28,7 +28,7 @@ How the images of [`romeujr/bitcoin-core`](https://hub.docker.com/r/romeujr/bitc
 
 ## Releasing a new Bitcoin Core version
 
-1. Add the version to [`versions.txt`](../versions.txt) in a branch, open a PR. CI builds and tests the newest version on both architectures.
+1. Add the version to [`versions.txt`](../versions.txt) in a branch, open a PR. CI builds and tests the newest version on both architectures, and the oldest one on amd64.
 2. Merge. `publish.yml` publishes the lines added to `versions.txt`, and moves `latest` when the newest version was added.
 
 No local build is needed.

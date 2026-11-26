@@ -42,16 +42,22 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with:
-          fetch-depth: 2
+          fetch-depth: 0
 
       - id: plan
         env:
           EVENT: ${{ github.event_name }}
           INPUT: ${{ github.event.inputs.versions }}
+          BEFORE: ${{ github.event.before }}
         run: |
+          # A push can carry several commits: compare with the commit main
+          # pointed to before the push, not just with HEAD^.
+          if [ "${EVENT}" = "push" ] && ! git cat-file -e "${BEFORE}^{commit}" 2> /dev/null; then
+            BEFORE="HEAD^"
+          fi
           case "${EVENT}" in
             schedule) list="$(bash versions.sh supported)" ;;
-            push)     list="$(git diff HEAD^ HEAD -- versions.txt | sed -nE 's/^\+[[:space:]]*([0-9][0-9.]*)[[:space:]]*$/\1/p')" ;;
+            push)     list="$(git diff "${BEFORE}" HEAD -- versions.txt | sed -nE 's/^\+[[:space:]]*([0-9][0-9.]*)[[:space:]]*$/\1/p')" ;;
             *)        case "${INPUT}" in
                         supported|latest|all) list="$(bash versions.sh "${INPUT}")" ;;
                         *) list="${INPUT}" ;;
@@ -109,9 +115,11 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # v4 installs cosign 3.x: signatures are stored as OCI 1.1 referrers in
-      # the Sigstore bundle format (verifiers need cosign 2.6 or later).
-      - uses: sigstore/cosign-installer@v4
+      # cosign-installer 4.x installs cosign 3.x: signatures are stored as OCI
+      # 1.1 referrers in the Sigstore bundle format (verifiers need cosign 2.6
+      # or later). The action has no floating major tag ("@v4" does not
+      # resolve), so the full version is pinned; Dependabot keeps it updated.
+      - uses: sigstore/cosign-installer@v4.1.4
 
       - name: Build, push and sign
         env:
