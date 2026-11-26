@@ -24,7 +24,7 @@ jobs:
           echo "DOCKERHUB.md: ${size} characters"
           [ "${size}" -le 25000 ] || { echo "::error::DOCKERHUB.md exceeds the Docker Hub limit of 25,000 characters"; exit 1; }
 
-      - uses: peter-evans/dockerhub-description@v4
+      - uses: peter-evans/dockerhub-description@v5
         with:
           username: ${{ vars.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
