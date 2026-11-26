@@ -41,7 +41,17 @@ SIGN="${SIGN:-false}"
 step() { echo ""; echo "==> $*"; }
 
 index_digest() {
-  docker buildx --builder "${BUILDER}" imagetools inspect "$1" | awk '/^Digest:/ { print $2; exit }'
+  # No pipe: with "| awk '... exit'" the reader quit early, buildx got SIGPIPE,
+  # docker exited 255 without a message and pipefail aborted the script.
+  # "{{with}}" is needed: a format starting with "{{.Manifest" prints the
+  # default text output instead.
+  local digest
+  digest="$(docker buildx --builder "${BUILDER}" imagetools inspect "$1" --format '{{with .Manifest}}{{.Digest}}{{end}}')"
+  if [ -z "${digest}" ]; then
+    echo "ERROR: could not read the digest of $1." >&2
+    return 1
+  fi
+  echo "${digest}"
 }
 
 platform_digest() {
