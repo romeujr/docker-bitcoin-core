@@ -109,9 +109,11 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # v4 installs cosign 3.x: signatures are stored as OCI 1.1 referrers in
-      # the Sigstore bundle format (verifiers need cosign 2.6 or later).
-      - uses: sigstore/cosign-installer@v4
+      # cosign-installer 4.x installs cosign 3.x: signatures are stored as OCI
+      # 1.1 referrers in the Sigstore bundle format (verifiers need cosign 2.6
+      # or later). The action has no floating major tag ("@v4" does not
+      # resolve), so the full version is pinned; Dependabot keeps it updated.
+      - uses: sigstore/cosign-installer@v4.1.4
 
       - name: Build, push and sign
         env:
