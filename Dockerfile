@@ -567,7 +567,20 @@ if [ -z "${pid}" ]; then
   exit 1
 fi
 
-cli=(bitcoin-cli -rpcclienttimeout=10)
+# Run bitcoin-cli as the user running bitcoind. As root (the default for
+# "docker exec" and Docker health checks), older bitcoin-cli releases (e.g. 22.x)
+# create the network directory (regtest/, wallets/...) when bitcoind has not
+# created it yet, owned by root: bitcoind then cannot write to it and stops.
+run_as=()
+if [ "$(id -u)" = "0" ]; then
+  uid="$(awk '/^Uid:/ { print $2 }' "/proc/${pid}/status" 2>/dev/null)"
+  gid="$(awk '/^Gid:/ { print $2 }' "/proc/${pid}/status" 2>/dev/null)"
+  if [[ "${uid}" =~ ^[1-9][0-9]*$ ]] && [[ "${gid}" =~ ^[0-9]+$ ]]; then
+    run_as=(setpriv --reuid="${uid}" --regid="${gid}" --clear-groups)
+  fi
+fi
+
+cli=("${run_as[@]}" bitcoin-cli -rpcclienttimeout=10)
 while IFS= read -r -d '' arg; do
   case "${arg}" in
     -datadir=*|--datadir=*|-conf=*|--conf=*|-chain=*|--chain=*|\
