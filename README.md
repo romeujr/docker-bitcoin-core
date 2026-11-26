@@ -29,7 +29,7 @@ The image is built to be *boring and safe* for long-running nodes: your data is 
 | **Runs as your host user** | Set `B_UID` / `B_GID` and the blockchain, wallets and `.cookie` on the host belong to a real host user, which makes backups, restores and host-side tools (`bitcoin-cli`, Electrum servers, explorers) straightforward. |
 | **Unprivileged** | `bitcoind` never runs as root. Compatible with the Kubernetes *restricted* Pod Security Standard (non-root, read-only root filesystem, no capabilities). |
 | **Signed, with SBOM and provenance** | Images published by GitHub Actions are signed with cosign and carry SBOM and SLSA provenance attestations. |
-| **Kept up to date** | The supported versions are rebuilt every month on a fresh Debian base for security updates, and every build is scanned and tested on amd64 and arm64. |
+| **Kept up to date** | The supported versions are rebuilt every month on a fresh Debian base for security updates. Every change is built, tested and scanned on amd64 and arm64 by CI, and each version passes the tests again right before it is published. |
 | **Cloud ready** | Health check script for Docker, Compose, Kubernetes and ECS probes; a warning when the memory limit is too small for `-dbcache`; a [Kubernetes guide](docs/kubernetes.md). |
 | **Plain Bitcoin Core** | Every `bitcoind` option works as documented; the image adds no wrapper configuration. Logs go to `docker logs`. |
 | **One self-contained Dockerfile** | No scripts, no files to `COPY`, a single `RUN` layer: easy to audit, copy and customize. |

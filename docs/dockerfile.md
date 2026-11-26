@@ -799,4 +799,4 @@ Known limitations:
 - The image is **not bit-for-bit reproducible** (see step 8); the Bitcoin Core files are.
 - The SBOM covers the Debian packages only (see step 7).
 - A local build without `P_GUIX_SIGS_REF` uses the **current** `main` of `guix.sigs`. Published images always use a pinned commit, shown in the label.
-- Images built and pushed outside GitHub Actions (possible for maintainers, see [publishing.md](publishing.md#building-and-publishing-locally-wsl)) are not signed, so they fail step 2. Do not use an image that fails it.
+- Images built and pushed outside GitHub Actions (possible for maintainers, see [publishing.md](publishing.md#building-and-publishing-locally-wsl)) are not signed by the workflow, so they fail step 2. Do not use an image that fails it.

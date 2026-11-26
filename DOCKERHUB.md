@@ -124,6 +124,8 @@ cosign verify romeujr/bitcoin-core:32.1 \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com
 ```
 
+Every part of the Dockerfile is explained, with a step-by-step audit (provenance, builder keys, binaries compared byte for byte with the official release): [The Dockerfile, explained](https://github.com/romeujr/docker-bitcoin-core/blob/main/docs/dockerfile.md).
+
 ## More
 
 Everything else (recipes, RPC and cookie access from the host, ZMQ, Tor, logs, extending the image, building it yourself, migrating from `ruimarinho/bitcoin-core`, changelog) is on GitHub:
