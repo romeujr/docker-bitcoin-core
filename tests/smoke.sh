@@ -96,9 +96,13 @@ docker run --rm "${IMG}" bitcoin-cli -version | grep -c "RPC client" > /dev/null
 docker run --rm "${IMG}" bitcoin-tx -help | grep -c "bitcoin-tx" > /dev/null && pass "bitcoin-tx -help" || fail "bitcoin-tx -help"
 
 section "Data directory protections"
-mkdir -p "${WORK}/ro" "${WORK}/daemon" "${WORK}/pods/uid/volumes/kubernetes.io~empty-dir/data"
-printf 'daemon=1\n' > "${WORK}/daemon/bitcoin.conf"
-docker run --rm -v "${WORK}:/w" "${IMG}" bash -c 'mkdir -p /w/foreign && touch /w/foreign/blk && chown -R 4321:4321 /w/foreign && chmod 700 /w/foreign'
+mkdir -p "${WORK}/ro" "${WORK}/pods/uid/volumes/kubernetes.io~empty-dir/data"
+# Created in a container with fixed owners: the host user is not always uid
+# 1000 (GitHub runners use 1001), and these checks must not depend on it.
+docker run --rm -v "${WORK}:/w" "${IMG}" bash -c '
+  mkdir -p /w/foreign /w/daemon
+  touch /w/foreign/blk && chown -R 4321:4321 /w/foreign && chmod 700 /w/foreign
+  printf "daemon=1\n" > /w/daemon/bitcoin.conf && chown -R 1000:1000 /w/daemon'
 
 expect_refused "no volume" "is not on a Docker volume or bind mount" "${IMG}" -regtest
 expect_refused "anonymous volume" "ANONYMOUS Docker volume" -v "${DATA}" "${IMG}" -regtest
