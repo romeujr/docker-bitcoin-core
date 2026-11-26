@@ -76,7 +76,8 @@ stop_node() {
   local name="$1" code
   docker stop -t 120 "${name}" > /dev/null
   code="$(docker inspect -f '{{.State.ExitCode}}' "${name}")"
-  if [ "${code}" = "0" ] && docker logs "${name}" 2>&1 | tail -n 3 | grep -c "Shutdown done" > /dev/null; then
+  # Older releases log "Shutdown: done", newer ones "Shutdown done".
+  if [ "${code}" = "0" ] && docker logs "${name}" 2>&1 | tail -n 3 | grep -cE "Shutdown:? done" > /dev/null; then
     pass "${name#"${PREFIX}"-} stops cleanly (exit 0, \"Shutdown done\")"
   else
     fail "${name#"${PREFIX}"-} stops cleanly (exit ${code})"
