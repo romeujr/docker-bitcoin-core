@@ -116,6 +116,8 @@ Tools: `bitcoin-cli`, `bitcoin-tx`, `bitcoin-util`, `bitcoin-wallet` are on the 
 
 ## Verify the image
 
+With cosign 2.6 or later:
+
 ```bash
 cosign verify romeujr/bitcoin-core:32.1 \
   --certificate-identity-regexp '^https://github.com/romeujr/docker-bitcoin-core/\.github/workflows/publish\.yml@' \

@@ -1,7 +1,18 @@
 # Keeps the GitHub Actions used by the workflows up to date.
+#
+# Every update (major, minor and patch) is grouped in a single weekly PR, so the
+# default limit of 5 open Dependabot PRs never holds an update back. Major
+# versions can change behavior: read the release notes linked in the PR. CI
+# only exercises actions/checkout; the actions used by publish.yml and
+# dockerhub-description.yml run only on main (run "Publish" manually to check).
 version: 2
 updates:
   - package-ecosystem: github-actions
     directory: /
     schedule:
       interval: weekly
+    groups:
+      github-actions:
+        patterns: ["*"]
+    commit-message:
+      prefix: ci
