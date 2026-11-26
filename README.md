@@ -531,7 +531,7 @@ Standard `org.opencontainers.image.*` labels (version, source, revision of this 
 
 - `bitcoind` runs as an unprivileged user; root is refused.
 - Release binaries are verified at build time against the Bitcoin Core builders' GPG signatures and SHA-256 checksums.
-- Published images are signed (keyless cosign, GitHub Actions OIDC) and carry an SBOM and SLSA provenance. Verify before deploying:
+- Published images are signed (keyless cosign, GitHub Actions OIDC) and carry an SBOM and SLSA provenance. Verify before deploying (cosign 2.6 or later):
 
   ```bash
   cosign verify romeujr/bitcoin-core:32.1 \

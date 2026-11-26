@@ -56,7 +56,7 @@ For each version and each registry (`docker.io/romeujr/bitcoin-core`, `ghcr.io/r
 - keyless cosign signatures (GitHub OIDC) on all of the above;
 - labels: `org.opencontainers.image.revision` (commit of this repository) and `io.github.romeujr.bitcoin-core.guix-sigs-ref` (commit of `bitcoin-core/guix.sigs` whose builder keys verified the release).
 
-Verify a published image:
+Verify a published image (signatures are made with cosign 3, so verifying them needs cosign 2.6 or later):
 
 ```bash
 cosign verify docker.io/romeujr/bitcoin-core:32.1 \

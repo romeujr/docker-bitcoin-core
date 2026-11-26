@@ -109,7 +109,9 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - uses: sigstore/cosign-installer@v3
+      # v4 installs cosign 3.x: signatures are stored as OCI 1.1 referrers in
+      # the Sigstore bundle format (verifiers need cosign 2.6 or later).
+      - uses: sigstore/cosign-installer@v4
 
       - name: Build, push and sign
         env:
