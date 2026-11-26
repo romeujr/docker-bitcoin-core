@@ -6,7 +6,7 @@
 # - monthly: rebuilds the supported versions to pick up Debian security updates;
 # - manually: "supported", "latest", "all" or a list such as "30.4 31.2".
 #
-# Repository secrets: DOCKERHUB_USERNAME, DOCKERHUB_TOKEN (see docs/publishing.md).
+# Repository variable: DOCKERHUB_USERNAME. Repository secret: DOCKERHUB_TOKEN (see docs/publishing.md).
 name: Publish
 
 on:
@@ -100,7 +100,7 @@ jobs:
 
       - uses: docker/login-action@v3
         with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          username: ${{ vars.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
       - uses: docker/login-action@v3

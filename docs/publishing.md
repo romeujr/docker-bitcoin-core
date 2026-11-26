@@ -20,9 +20,9 @@ How the images of [`romeujr/bitcoin-core`](https://hub.docker.com/r/romeujr/bitc
 ## One-time setup
 
 1. **Docker Hub token.** In Docker Hub, create a personal access token ("Account settings" > "Personal access tokens"). Updating the repository description requires a token with *Read, Write, Delete* permissions (see [peter-evans/dockerhub-description](https://github.com/peter-evans/dockerhub-description)).
-2. **GitHub secrets.** In the repository, "Settings" > "Secrets and variables" > "Actions", add:
-   - `DOCKERHUB_USERNAME`: `romeujr`
-   - `DOCKERHUB_TOKEN`: the token above
+2. **GitHub variable and secret.** In the repository, "Settings" > "Secrets and variables" > "Actions", add:
+   - on the "Variables" tab, the repository variable `DOCKERHUB_USERNAME`: `romeujr` (it is not sensitive, and as a variable it is not masked in the logs)
+   - on the "Secrets" tab, the repository secret `DOCKERHUB_TOKEN`: the token above
 3. **GHCR.** Nothing to configure: the workflow uses the built-in `GITHUB_TOKEN`. After the first publish, open the `bitcoin-core` package on GitHub ("Packages"), and in "Package settings" set its visibility to **Public** (new packages are private) and check that it is linked to this repository.
 4. **Branch protection (recommended).** Require the `CI` checks before merging into `main`.
 
